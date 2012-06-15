@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 from jupyLR import Automaton
-from scanner import r_scanner
+from scanneR import r_scanner
 
 
 # http://stat.ethz.ch/R-manual/R-patched/library/base/html/Syntax.html
@@ -251,13 +251,20 @@ class Assign(Rentity):
         return self.rhs
 
 
-class Bloc(Rentity, tuple):
+class Statements(Rentity):
 
-    def __new__(cls, ast):
-        return tuple.__new__(cls, ast[2:-1])
+    def __init__(self, statements):
+        self.statements = statements
 
     def __str__(self):
-        return 'Bloc(' + str(len(self)) + ' statements)'
+        return (type(self).__name__ + '('
+                + str(len(self.statements)) + ' statements)')
+
+
+class Bloc(Statements):
+
+    def __init__(self, ast):
+        Statements.__init__(self, ast[2:-1])
 
 
 class If(Rentity):
@@ -337,6 +344,12 @@ class Call(Rentity):
                 + str(self.params) + ')')
 
 
+class Script(Statements):
+
+    def __init__(self, ast):
+        Statements.__init__(self, ast[1:])
+
+
 class ParseR(Automaton):
 
     def __init__(self):
@@ -368,7 +381,7 @@ class ParseR(Automaton):
         return Bloc(ast)
 
     def script(self, ast):
-        return ast[1:]
+        return Script(ast[1:])
 
     def discard_nl(self, ast):
         return tuple()
@@ -391,6 +404,11 @@ class ParseR(Automaton):
         else:
             ret = ast
         #print ret
+        return ret
+
+    def __call__(self, text):
+        ret = Automaton.__call__(self, text)
+        #ret.register_stuff()
         return ret
 
 #
