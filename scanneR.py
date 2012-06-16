@@ -3,14 +3,12 @@ from jupyLR import Scanner
 from itertools import imap
 
 int_suffix = "(?:L|LL|U|UL|ULL)?"
-int_dec = "(?:0|[1-9][0-9]*)" + int_suffix
-int_oct = "0[0-7]+" + int_suffix
 int_hex = "0x[a-fA-F0-9]+" + int_suffix
 
-
-num = r"(?:\.[0-9]+|(?:[0-9]+)(?:\.[0-9]*)?)"
+num1 = r"[0-9]+(?:[.][0-9]*)?"
+num2 = r"[.][0-9]+"
 expo = r"(?:[eE]-?[0-9]+\.?[0-9]*)?[uUlLdf]*"
-number = num + expo
+number = '(?:(?:' + num1 + '|' + num2 + ')' + expo + '|' + int_hex + ')'
 
 keywords = [
     'repeat', 'while', 'for', 'if', 'else', 'source', 'return', 'function',
@@ -56,6 +54,7 @@ misc = dict(PLUS='+', MINUS='-', STAR='*', SLASH='/',
             SCOPE='::',
             HIDDEN_SCOPE=':::',
             SEMICOLON=';',
+            DOLLAR='$',
             OPEN_PAR='(',
             CLOSE_PAR=')',
             OPEN_CURLY='{',
@@ -102,17 +101,15 @@ for k, op in three_char.iteritems():
 discard_them_all = ['WS', 'comment']
 
 r_scanner = (Scanner(**kw_dic)
-                .add(NEWLINE="[\n]")
+                #.add(NEWLINE="[\n]")
                 .add(**three_char)
                 .add(**two_char)
                 .add(**one_char)
                 .add(SYM=r'\b[.a-zA-Z_][.a-zA-Z0-9_]*\b')
-                .add(INT_HEX=int_hex)
-                .add(INT_OCT=int_oct)
-                .add(INT_DEC=int_dec)
                 .add(NUM=number)
                 .add(STRING=r'L?"(?:\\["bntr]|[^\\"])*"')
                 .add(CHAR=r"L?'(?:\\['bntr\\]|[^\\'])'")
-                .add(WS='[ \t]+')
+                #.add(WS='[ \t]+')
+                .add(WS='[ \t\r\n]+')
                 .add(comment='[#][^\n]*')
                 .add(discard_names=discard_them_all))
