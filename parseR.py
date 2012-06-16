@@ -23,32 +23,17 @@ class ParseR(Automaton):
                 return If(ast)
         return ast
 
-    #def immed(self, ast):
-    #    return Immed(ast)
-
-    def func_call(self, ast):
-        return Call(ast)
-
     def scoped_atom(self, ast):
         return Name(ast)
-
-    #def bloc(self, ast):
-    #    return Bloc(ast)
-
-    #def script(self, ast):
-    #    return Script(ast)
-
-    #def discard_semicolon(self, ast):
-    #    return tuple()
-
-    #def func_decl(self, ast):
-    #    return Function(ast)
 
     def rightwards_assign(self, ast):
         return Assign(ast, True)
 
     def leftwards_assign(self, ast):
         return Assign(ast)
+
+    def discard_semicolon(self, ast):
+        return tuple()
 
     def validate_ast(self, ast):
         if ast[0] in RentityMeta.registry:
@@ -58,6 +43,8 @@ class ParseR(Automaton):
         else:
             ret = ast
         #print ret
+        if type(ret) is tuple and len(ret):
+            print "untransformed", ret
         return ret
 
     def __call__(self, filename):

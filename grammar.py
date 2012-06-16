@@ -43,7 +43,7 @@ R_grammar = """
 -e2 = e1  | exponentiation
 -e1 = atom
     | indexing
-    | func_call
+    | call
     | slot_extraction
 
 slot_extraction
@@ -53,7 +53,7 @@ indexing
     = e1 OPEN_SQ expression_list CLOSE_SQ
     | e1 OPEN_SQ OPEN_SQ expression_list CLOSE_SQ CLOSE_SQ
 
-func_call
+call
     = e1 OPEN_PAR expression_list CLOSE_PAR
     | e1 OPEN_PAR CLOSE_PAR
 
@@ -73,10 +73,13 @@ immed
 -atom
     = scoped_atom
     | immed
-    | OPEN_PAR expression CLOSE_PAR
-    | func_decl
+    | subexpr
+    | function
 
-func_decl
+subexpr
+    = OPEN_PAR expression CLOSE_PAR
+
+function
     = FUNCTION OPEN_PAR param_list CLOSE_PAR bloc
     | FUNCTION OPEN_PAR CLOSE_PAR bloc
 
@@ -160,13 +163,23 @@ statement
 -raw_statement
     = expression
     | SOURCE OPEN_PAR STRING CLOSE_PAR
-    | IF OPEN_PAR expression CLOSE_PAR statement
-    | IF OPEN_PAR expression CLOSE_PAR statement ELSE statement
-    | FOR OPEN_PAR SYM IN expression CLOSE_PAR statement
-    | WHILE OPEN_PAR expression CLOSE_PAR statement
+    | if
+    | for
+    | return
+    | while
     | REPEAT statement
-    | RETURN OPEN_PAR expression CLOSE_PAR
     | bloc
+
+while
+    = WHILE OPEN_PAR expression CLOSE_PAR statement
+
+if  = IF OPEN_PAR expression CLOSE_PAR statement
+    | IF OPEN_PAR expression CLOSE_PAR statement ELSE statement
+
+for = FOR OPEN_PAR SYM IN expression CLOSE_PAR statement
+
+return
+    = RETURN OPEN_PAR expression CLOSE_PAR
 
 -expression_list
     = expression_list COMMA expression
