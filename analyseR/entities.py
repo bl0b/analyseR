@@ -120,7 +120,13 @@ class Function(Rentity):
     def __init__(self, ast):
         Rentity.__init__(self)
         self.ast = ast
-        self.name = None
+        #self.name = None
+        lineno = (open(RContext.current_file[-1])
+                  .read(ast[1][2]).count('\n')
+                  + 1)
+        self.name = Name((tuple(),
+                          ('', RContext.current_file[-1]
+                               + ':' + str(lineno))))
 
     def __str__(self):
         return ('Function'
@@ -429,4 +435,7 @@ class Exponentiation(BinOp):
 
 
 class Slot_extraction(BinOp):
-    pass
+
+    @property
+    def name(self):
+        return str(self.operands[0]) + '$' + str(self.operands[1])

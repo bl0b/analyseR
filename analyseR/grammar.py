@@ -67,7 +67,6 @@ scoped_atom
 
 immed
     = STRING
-    | CHAR
     | NUM
 
 -atom
@@ -75,13 +74,14 @@ immed
     | immed
     | subexpr
     | function
+    | bloc
 
 subexpr
     = OPEN_PAR expression CLOSE_PAR
 
 function
-    = FUNCTION OPEN_PAR param_list CLOSE_PAR bloc
-    | FUNCTION OPEN_PAR CLOSE_PAR bloc
+    = FUNCTION OPEN_PAR param_list CLOSE_PAR statement
+    | FUNCTION OPEN_PAR CLOSE_PAR statement
 
 bloc
     = OPEN_CURLY statements CLOSE_CURLY
@@ -169,7 +169,6 @@ statement
     | return
     | while
     | REPEAT statement
-    | bloc
 
 while
     = WHILE OPEN_PAR expression CLOSE_PAR statement

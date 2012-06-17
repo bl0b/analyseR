@@ -59,7 +59,6 @@ misc = dict(PLUS='+', MINUS='-', STAR='*', SLASH='/',
             CLOSE_PAR=')',
             OPEN_CURLY='{',
             CLOSE_CURLY='}',
-            PERCENT='%',
             OPEN_SQ='[',
             CLOSE_SQ=']',
             #ELLIPSIS='...',
@@ -100,15 +99,18 @@ for k, op in three_char.iteritems():
 
 discard_them_all = ['WS', 'comment']
 
+s1 = r'"(?:\\["bntr]|[^\\"])*"'
+s2 = r"'(?:\\['bntr]|[^\\'])*'"
+
 r_scanner = (Scanner(**kw_dic)
                 #.add(NEWLINE="[\n]")
                 .add(**three_char)
                 .add(**two_char)
                 .add(**one_char)
-                .add(SYM=r'\b[.a-zA-Z_][.a-zA-Z0-9_]*\b')
                 .add(NUM=number)
-                .add(STRING=r'L?"(?:\\["bntr]|[^\\"])*"')
-                .add(CHAR=r"L?'(?:\\['bntr\\]|[^\\'])'")
+                .add(STRING="(?:%s|%s)" % (s1, s2))
+                .add(SYM=r'[.a-zA-Z_][.a-zA-Z0-9_]*')
+                .add(SPECIAL_OP=r'%[^%]*%')
                 #.add(WS='[ \t]+')
                 .add(WS='[ \t\r\n]+')
                 .add(comment='[#][^\n]*')
