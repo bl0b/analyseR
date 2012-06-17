@@ -3,6 +3,7 @@ from jupyLR import Automaton
 from scanneR import r_scanner
 from grammar import R_grammar
 from entities import *
+from entities import RentityMeta
 
 
 class ParseR(Automaton):
@@ -47,10 +48,16 @@ class ParseR(Automaton):
             print "untransformed", ret
         return ret
 
-    def __call__(self, filename):
+    def __call__(self, filename=None, text=None):
+        if text is None and filename is not None:
+            text = open(filename).read()
+        elif text is not None:
+            filename = '<text>'
+        else:
+            return None
+        print "Parsing", filename
         RContext.current_file.append(filename)
-        ret = Automaton.__call__(self, open(filename).read())
-        #ret.register_stuff()
+        ret = Automaton.__call__(self, text)
         RContext.current_file.pop()
         return ret
 
@@ -58,10 +65,9 @@ class ParseR(Automaton):
 R = ParseR()
 
 
-def parse(filename):
-    if len(RContext.current_file):
+def parse(filename=None, text=None):
+    if RContext.current_file[-1] != '':
         print "[sourced by %s]" % RContext.current_file[-1],
-    print "Parsing", filename
-    return R(filename)[0]
+    return R(filename, text)[0]
 
 RContext.parse = staticmethod(parse)

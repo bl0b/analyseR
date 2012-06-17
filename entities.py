@@ -1,19 +1,32 @@
+__all__ = ['RContext',  'Rentity',  'AllIndices',  'Source',  'Function',
+           'Assign',  'Statements',  'Bloc',  'If',  'Return',  'Immed',
+           'Name',  'Param',  'Param_list',  'Call',  'Script',  'For',
+           'While',  'Repeat',  'Subexpr',  'Unary_plus_or_minus',
+           'Indexing',  'Negation',  'BinOp',  'Sequence',  'Addsub',
+           'Special_op',  'Muldiv',  'Comparison',  'Bool_and',  'Bool_or',
+           'Formula',  'Exponentiation',  'Slot_extraction']
+
+
 class RContext(object):
     current_file = ['']
     parse = None
 
 
-_entrail_get = lambda self, e: getattr(self, '_' + e)
+_entrail_get = lambda e: lambda self: getattr(self, '_' + e)
 
 
-def _entrail_set(self, e, v):
-    if type(v) in (list, tuple):
-        for x in v:
-            if isinstance(x, Rentity):
-                x.parent = self
-    elif isinstance(v, Rentity):
-        v.parent = self
-    setattr(self, '_' + e, v)
+def _entrail_set(e):
+    def _(self, v):
+        if type(v) in (list, tuple):
+            for x in v:
+                if isinstance(x, Rentity):
+                    x.parent = self
+        elif isinstance(v, Rentity):
+            v.parent = self
+        setattr(self, '_' + e, v)
+        #print "set entrail", e, v, getattr(self, '_' + e)
+        return v
+    return _
 
 
 class RentityMeta(type):
@@ -22,8 +35,7 @@ class RentityMeta(type):
     def __init__(cls, name, bases, dic):
         RentityMeta.registry[name.lower()] = cls
         for e in cls.entrails:
-            setattr(cls, e, property(lambda s: _entrail_get(s, e),
-                                     lambda s, v: _entrail_set(s, e, v)))
+            setattr(cls, e, property(_entrail_get(e), _entrail_set(e)))
 
 
 class Rentity(object):
@@ -33,6 +45,8 @@ class Rentity(object):
     def __init__(self):
         self.filename = RContext.current_file[-1]
         self.parent = None
+        #for e in self.entrails:
+        #    setattr(self, e, None)
 
     def __repr__(self):
         return str(self)
@@ -173,9 +187,11 @@ class If(Rentity):
 
     def __init__(self, ast):
         Rentity.__init__(self)
+        #print "IF (ast)", ast
         self.condition = ast[3]
         self.then = ast[5]
-        self.els_ = len(ast) == 7 and ast[7] or None
+        self.els_ = len(ast) == 8 and ast[7] or None
+        #print "IF (properties)", self.condition, self.then, self.els_
 
     def __str__(self):
         ret = 'If(condition=' + str(self.condition)
