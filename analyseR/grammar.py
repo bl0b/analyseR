@@ -163,6 +163,7 @@ statement
 -raw_statement
     = expression
     | SOURCE OPEN_PAR STRING CLOSE_PAR
+    | SOURCE OPEN_PAR STRING COMMA param_list CLOSE_PAR
     | if
     | for
     | return
