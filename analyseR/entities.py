@@ -236,6 +236,18 @@ class Param_list(Rentity):
             p.reg_name(p.name, p)
 
 
+class Expression_list(Rentity):
+    entrails = ['expressions']
+
+    def __init__(self, ast):
+        Rentity.__init__(self)
+        print "expr list", ast
+        self.expressions = extract_list(ast[1:])
+
+    def __str__(self):
+        return 'ExprList(' + ', '.join(str(x) for x in self.params) + ')'
+
+
 class Toplevel_expression(Statement):
     entrails = ['expression']
 
@@ -254,6 +266,10 @@ class Toplevel_expression(Statement):
         return self.expression.eval_to()
 
 
+class CallContext(Renv, Rentity):
+    pass
+
+
 class Call(Rentity):
     entrails = ['callee', 'params']
     previous = wrap_previous(lambda s: s.callee)
@@ -269,18 +285,26 @@ class Call(Rentity):
 
     def eval_to(self):
         f = self.callee.eval_to()
-        if f == self.callee:
+        if f is self.callee:
             return self
         p = f.code.previous
-        env = Renv()
-        names = [p.name for p in f.params]
-        values = [p.value for p in f.params]
-        for j, par in enumerate(self.params):
-            if par.name:
-                i = names.index(par.name)
+        env = CallContext()
+        env.previous = self.previous
+        names = [p.name for p in f.params.params]
+        values = [p.value for p in f.params.params]
+        for j, par in enumerate(self.params.expressions):
+            if isinstance(par, Assign):
+                i = names.index(par.lhs.name)
+                value = par.rhs.eval_to()
             else:
                 i = j
-            values[i] = par.value.eval_to()
+                value = par.eval_to()
+            values[i] = [value]
+        env.names.update(izip(names, values))
+        f.code.previous = env
+        ret = f.code.eval_to()
+        f.code.previous = p
+        return ret
 
 
 class Script(Renv, Statements):
@@ -399,7 +423,11 @@ class BinOp(Rentity):
         a = self.operands[0].eval_to()
         b = self.operands[1].eval_to()
         if type(a) is Immed and type(b) is Immed:
-            return Immed((None, (a.typ, self.op(a.value(), b.value()))))
+            try:
+                result = self.op(a.value(), b.value())
+                return Immed((None, (a.typ, result)))
+            except:
+                pass
         return type(self)((None, a, (self.operator,), b))
 
     def op(self, a, b):

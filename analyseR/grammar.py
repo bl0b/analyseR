@@ -207,11 +207,14 @@ statement_separator
 subexpr
     = OPEN_PAR expression CLOSE_PAR
 
--expression_list
-    = expression_list COMMA expression
+expression_list
+    = _elist
+
+-_elist
+    = _elist COMMA expression
     | expression
-    | COMMA expression_list
-    | expression_list COMMA
+    | COMMA _elist
+    | _elist COMMA
 
 -name
     = SYM
