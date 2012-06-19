@@ -1,106 +1,32 @@
-__all__ = ['RContext',  'Rentity',  'AllIndices',  'Source',  'Function',
-           'Assign',  'Statements',  'Bloc',  'If',  'Return',  'Immed',
-           'Name',  'Param',  'Param_list',  'Call',  'Script',  'For',
-           'While',  'Repeat',  'Subexpr',  'Unary_plus_or_minus',
-           'Indexing',  'Negation',  'BinOp',  'Sequence',  'Addsub',
-           'Special_op',  'Muldiv',  'Comparison',  'Bool_and',  'Bool_or',
-           'Formula',  'Exponentiation',  'Slot_extraction']
+__all__ = ['RContext', 'Rentity', 'AllIndices', 'Source', 'Function',
+           'Assign', 'Statements', 'Bloc', 'If', 'Return', 'Immed',
+           'Name', 'Param', 'Param_list', 'Call', 'Script', 'For',
+           'While', 'Repeat', 'Subexpr', 'Unary_plus_or_minus',
+           'Indexing', 'Negation', 'BinOp', 'Sequence', 'Addsub',
+           'Special_op', 'Muldiv', 'Comparison', 'Bool_and', 'Bool_or',
+           'Formula', 'Exponentiation', 'Slot_extraction']
+
+from itertools import *
+from entities_base import *
 
 
-class RContext(object):
-    current_file = ['']
-    parse = None
+def wrap_previous(get_target):
 
+    def _set(s, v):
+        t = get_target(s)
+        if t is not None:
+            t.previous = v
 
-_entrail_get = lambda e: lambda self: getattr(self, '_' + e)
+    def _get(s):
+        t = get_target(s)
+        return t and t.previous
 
-
-def _entrail_set(e):
-    def _(self, v):
-        if type(v) in (list, tuple):
-            for x in v:
-                if isinstance(x, Rentity):
-                    x.parent = self
-        elif isinstance(v, Rentity):
-            v.parent = self
-        setattr(self, '_' + e, v)
-        #print "set entrail", e, v, getattr(self, '_' + e)
-        return v
-    return _
-
-
-class RentityMeta(type):
-    registry = {}
-
-    def __init__(cls, name, bases, dic):
-        RentityMeta.registry[name.lower()] = cls
-        for e in cls.entrails:
-            setattr(cls, e, property(_entrail_get(e), _entrail_set(e)))
-
-
-class Rentity(object):
-    __metaclass__ = RentityMeta
-    entrails = []
-
-    def __init__(self):
-        self.filename = RContext.current_file[-1]
-        self.parent = None
-        #for e in self.entrails:
-        #    setattr(self, e, None)
-
-    def __repr__(self):
-        return str(self)
-
-    def search_iter(self, predicate):
-        if predicate(self):
-            yield self
-        for e in self.entrails:
-            x = getattr(self, e)
-            if type(x) in (list, tuple):
-                for k in x:
-                    if not isinstance(k, Rentity):
-                        if predicate(k):
-                            yield k
-                        continue
-                    for result in k.search_iter(predicate):
-                        yield result
-            elif isinstance(x, Rentity):
-                for result in x.search_iter(predicate):
-                    yield result
-
-    def get_filename(self):
-        if hasattr(self, 'filename'):
-            return self.filename
-        elif self.parent:
-            return self.parent.get_filename()
-
-
-class AllIndices(Rentity):
-
-    def __str__(self):
-        return "AllIndices"
-
-
-allindices = AllIndices()
-
-
-def extract_list(ast):
-    ret = []
-    on_comma = True
-    for a in ast:
-        if type(a) is tuple and a[0] == 'COMMA':
-            if on_comma:
-                ret.append(allindices)
-            else:
-                on_comma = True
-        else:
-            on_comma = False
-            ret.append(a)
-    return ret
+    return property(_get, _set)
 
 
 class Source(Rentity):
     entrails = ['contents']
+    previous = wrap_previous(lambda s: s.contents)
 
     def __init__(self, filename):
         Rentity.__init__(self)
@@ -110,20 +36,21 @@ class Source(Rentity):
     def __str__(self):
         return 'Source(' + self.filename + ')'
 
-    def eval(self):
+    def eval_to(self):
         return None
 
 
-class Function(Rentity):
-    entrails = ['ast']
+class Function(Renv, Rentity):
+    entrails = ['code', 'params']
 
     def __init__(self, ast):
+        Renv.__init__(self)
         Rentity.__init__(self)
         self.ast = ast
+        self.code = ast[-1]
+        self.params = ast[-3]
         #self.name = None
-        lineno = (open(RContext.current_file[-1])
-                  .read(ast[1][2]).count('\n')
-                  + 1)
+        lineno = RContext.current_text[-1][:ast[1][2]].count('\n') + 1
         self.name = Name((tuple(),
                           ('', RContext.current_file[-1]
                                + ':' + str(lineno))))
@@ -131,18 +58,19 @@ class Function(Rentity):
     def __str__(self):
         return ('Function'
                 + (self.name and ':' + str(self.name) or '')
-                + str(self.ast[1:]))
+                + '(' + str(self.params) + ') '
+                + str(self.code))
 
-    def make_name(self, name):
-        ret = Function(self.ast)
-        ret.name = name
-        return ret
+    #def make_name(self, name):
+    #    ret = Function(self.ast)
+    #    ret.name = name
+    #    return ret
 
-    def eval(self):
-        return self
+    def eval_to(self):
+        return self.code.eval_to()
 
 
-class Assign(Rentity):
+class Assign(Statement):
     entrails = ['lhs', 'rhs']
 
     def __new__(self, ast, rightwards=False):
@@ -150,12 +78,12 @@ class Assign(Rentity):
             n, f = 3, 1
         else:
             n, f = 1, 3
-        if type(ast[n]) is Name and type(ast[f]) is Function:
-            return ast[f].make_name(ast[n])
+        #if type(ast[n]) is Name and type(ast[f]) is Function:
+        #    return ast[f].make_name(ast[n])
         return Rentity.__new__(Assign)
 
     def __init__(self, ast, rightwards=False):
-        Rentity.__init__(self)
+        Statement.__init__(self)
         if rightwards:
             self.lhs = ast[3]
             self.rhs = ast[1]
@@ -166,33 +94,64 @@ class Assign(Rentity):
     def __str__(self):
         return 'Assign(lhs=' + str(self.lhs) + ', rhs=' + str(self.rhs) + ')'
 
-    def eval(self):
+    def eval_to(self):
         return self.rhs
 
+    def set_parent(self, p):
+        Statement.set_parent(self, p)
+        self.reg_name(self.lhs, self.rhs)
 
-class Statements(Rentity):
+    def resolve(self, name):
+        if self.lhs == name:
+            return self.rhs
+        return None
+
+
+_prev_get = lambda s: len(s.statements) and s.statements[0].previous or None
+
+
+def _prev_set(s, v):
+    if s.statements is None or not len(s.statements):
+        return
+    s.statements[0].previous = v
+
+
+class Statements(Statement):
     entrails = ['statements']
 
+    previous = property(_prev_get, _prev_set)
+
     def __init__(self, statements):
-        Rentity.__init__(self)
+        Statement.__init__(self)
         self.statements = statements
+        for i in xrange(1, len(statements)):
+                statements[i].previous = statements[i - 1]
 
     def __str__(self):
         return (type(self).__name__ + '('
                 + str(len(self.statements)) + ' statements)')
+
+    def eval_to(self):
+        return self.statements[-1].eval_to()
 
 
 class Bloc(Statements):
 
     def __init__(self, ast):
         Statements.__init__(self, ast[2:-1])
+        returns = filter(lambda x: type(x) is Return, self.statements)
+        self.has_return = returns and returns[0] or None
+
+    def eval_to(self):
+        return (self.has_return and self.has_return.eval_to()
+                or self.statements[-1])
 
 
-class If(Rentity):
+class If(Statement):
     entrails = ['condition', 'then', 'els_']
 
     def __init__(self, ast):
-        Rentity.__init__(self)
+        Statement.__init__(self)
         #print "IF (ast)", ast
         self.condition = ast[3]
         self.then = ast[5]
@@ -208,14 +167,18 @@ class If(Rentity):
         return ret
 
 
-class Return(Rentity):
+class Return(Statement):
     entrails = ['expression']
 
     def __init__(self, ast):
+        Statement.__init__(self)
         self.expression = ast[3]
 
     def __str__(self):
         return 'Return(' + str(self.expression) + ')'
+
+    def eval_to(self):
+        return self.expression
 
 
 class Immed(Rentity):
@@ -228,28 +191,11 @@ class Immed(Rentity):
     def __str__(self):
         return str(self.typ) + '(' + str(self.val) + ')'
 
-
-class Name(Rentity):
-
-    def __init__(self, ast):
-        Rentity.__init__(self)
-        if len(ast) == 4:
-            self.namespace = type(ast[1]) is tuple and ast[1][1] or ast[1]
-            self.visibility = ast[2][1]
-            self.name = ast[3][1]
-        else:
-            self.namespace = None
-            self.visibility = None
-            self.name = ast[1][1]
-
-    def __str__(self):
-        ret = 'Name('
-        if self.namespace is not None:
-            ret += str(self.namespace)
-            ret += self.visibility
-        ret += self.name
-        ret += ')'
-        return ret
+    def value(self):
+        if self.typ == "STRING":
+            return self.val
+        elif self.typ == "NUM":
+            return float(self.val)
 
 
 class Param(Rentity):
@@ -262,13 +208,13 @@ class Param(Rentity):
             self.name = ast.lhs
             self.value = ast.rhs
         else:
-            self.name = None
-            self.value = ast
+            self.name = ast[1][1]
+            self.value = None
 
     def __str__(self):
         ret = 'Param('
         if self.name:
-            ret += 'name=' + str(self.name.name) + ', '
+            ret += 'name=' + str(self.name) + ', '
         ret += 'value=' + str(self.value) + ')'
         return ret
 
@@ -278,14 +224,39 @@ class Param_list(Rentity):
 
     def __init__(self, ast):
         Rentity.__init__(self)
-        self.params = extract_list(ast[2:-1])
+        print "param list", ast
+        self.params = extract_list(ast[1:])
 
     def __str__(self):
         return 'ParamList(' + ', '.join(str(x) for x in self.params) + ')'
 
+    def set_parent(self, p):
+        Rentity.set_parent(self, p)
+        for p in self.params:
+            p.reg_name(p.name, p)
+
+
+class Toplevel_expression(Statement):
+    entrails = ['expression']
+
+    def __new__(self, ast):
+        if isinstance(ast[1], Statement) or type(ast[1]) in (Bloc, Function):
+            return ast[1]
+
+    def __init__(self, ast):
+        Statement.__init__(self)
+        self.expression = ast[-1]
+
+    def __str__(self):
+        return 'Expr(' + str(self.expression) + ')'
+
+    def eval_to(self):
+        return self.expression.eval_to()
+
 
 class Call(Rentity):
-    entrails = ['params']
+    entrails = ['callee', 'params']
+    previous = wrap_previous(lambda s: s.callee)
 
     def __init__(self, ast):
         Rentity.__init__(self)
@@ -296,18 +267,34 @@ class Call(Rentity):
         return ('Call(callee=' + str(self.callee) + ', params='
                 + str(self.params) + ')')
 
+    def eval_to(self):
+        f = self.callee.eval_to()
+        if f == self.callee:
+            return self
+        p = f.code.previous
+        env = Renv()
+        names = [p.name for p in f.params]
+        values = [p.value for p in f.params]
+        for j, par in enumerate(self.params):
+            if par.name:
+                i = names.index(par.name)
+            else:
+                i = j
+            values[i] = par.value.eval_to()
 
-class Script(Statements):
+
+class Script(Renv, Statements):
 
     def __init__(self, ast):
+        Renv.__init__(self)
         Statements.__init__(self, ast[1:])
 
 
-class For(Rentity):
+class For(Statement):
     entrails = ['iteration', 'statement']
 
     def __init__(self, ast):
-        Rentity.__init__(self)
+        Statement.__init__(self)
         self.iteration = ast[3:-2]
         self.statement = ast[-1]
 
@@ -316,11 +303,11 @@ class For(Rentity):
                 + ', statement=' + str(self.statement) + ')')
 
 
-class While(Rentity):
+class While(Statement):
     entrails = ['condition', 'statement']
 
     def __init__(self, ast):
-        Rentity.__init__(self)
+        Statement.__init__(self)
         self.condition = ast[3:-2]
         self.statement = ast[-1]
 
@@ -329,11 +316,11 @@ class While(Rentity):
                 + ', statement=' + str(self.statement) + ')')
 
 
-class Repeat(Rentity):
+class Repeat(Statement):
     entrails = ['statement']
 
     def __init__(self, ast):
-        Rentity.__init__(self)
+        Statement.__init__(self)
         self.statement = ast[-1]
 
     def __str__(self):
@@ -384,12 +371,23 @@ class Negation(Rentity):
         return 'Not(' + str(self.expression) + ')'
 
 
+_binop_prev_get = lambda s: s.operands[0].previous
+
+
+def _binop_prev_set(s, p):
+    s.operands[0].previous = p
+
+
 class BinOp(Rentity):
     entrails = ['operands']
+
+    previous = property(_binop_prev_get, _binop_prev_set)
 
     def __init__(self, ast):
         self.operator = ast[2][0]
         self.operands = ast[1::2]
+        print self.operands
+        self.operands[1].previous = self.operands[0]
 
     def __str__(self):
         return (self.operator.capitalize() + '('
@@ -397,13 +395,30 @@ class BinOp(Rentity):
         self.op1 = ast[1]
         self.op2 = ast[3]
 
+    def eval_to(self):
+        a = self.operands[0].eval_to()
+        b = self.operands[1].eval_to()
+        if type(a) is Immed and type(b) is Immed:
+            return Immed((None, (a.typ, self.op(a.value(), b.value()))))
+        return type(self)((None, a, (self.operator,), b))
+
+    def op(self, a, b):
+        return type(self)((None, a, (self.operator,), b))
+
 
 class Sequence(BinOp):
-    pass
+
+    def op(self, a, b):
+        return Sequence((None, a, ('COLON',), b))
 
 
 class Addsub(BinOp):
-    pass
+
+    def op(self, a, b):
+        if self.operator == 'PLUS':
+            return a + b
+        else:
+            return a - b
 
 
 class Special_op(BinOp):
@@ -411,7 +426,12 @@ class Special_op(BinOp):
 
 
 class Muldiv(BinOp):
-    pass
+
+    def op(self, a, b):
+        if self.operator == 'STAR':
+            return a * b
+        else:
+            return a / b
 
 
 class Comparison(BinOp):
@@ -431,7 +451,9 @@ class Formula(BinOp):
 
 
 class Exponentiation(BinOp):
-    pass
+
+    def op(self, a, b):
+        return a ** b
 
 
 class Slot_extraction(BinOp):

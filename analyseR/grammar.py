@@ -25,13 +25,21 @@
 # help operator is left unimplemented.
 # start symbol is 'script'.
 
-R_grammar = """
+
+# turns out any statement is also an expression.
+# if (1) { 4 } else { 5 } + 10   => 4
+# if (0) { 4 } else { 5 } + 10   => 15
+
+
+# Operator precedence
+
+R_grammar = ("""
 -expression
     = e15
 -e15= e13 | leftwards_assign
 -e13= e12 | rightwards_assign
 -e12= e11 | formula
--e11= e10 | bool_or
+-e11= e10 | bool_or | statement
 -e10= e9  | bool_and
 -e9 = e8  | negation
 -e8 = e7  | comparison
@@ -45,7 +53,11 @@ R_grammar = """
     | indexing
     | call
     | slot_extraction
+"""
 
+# Operations
+
++ """
 slot_extraction
     = e1 DOLLAR name
 
@@ -56,9 +68,6 @@ indexing
 call
     = e1 OPEN_PAR expression_list CLOSE_PAR
     | e1 OPEN_PAR CLOSE_PAR
-
-discard_semicolon
-    = SEMICOLON
 
 scoped_atom
     = scoped_atom SCOPE name
@@ -76,12 +85,9 @@ immed
     | function
     | bloc
 
-subexpr
-    = OPEN_PAR expression CLOSE_PAR
-
 function
-    = FUNCTION OPEN_PAR param_list CLOSE_PAR statement
-    | FUNCTION OPEN_PAR CLOSE_PAR statement
+    = FUNCTION OPEN_PAR param_list CLOSE_PAR expression
+    | FUNCTION OPEN_PAR CLOSE_PAR expression
 
 bloc
     = OPEN_CURLY statements CLOSE_CURLY
@@ -96,7 +102,7 @@ param
     | name
 
 exponentiation
-    = e2 CIRCONFLEX NUM
+    = e2 CIRCONFLEX immed
 
 unary_plus_or_minus
     = PLUS e2
@@ -147,39 +153,59 @@ leftwards_assign
     | e12 LEFT_ARROW2 e13
     | e12 EQUAL e13
 
-script
-    = statements
+"""
 
+# Statements
+
++ """
 -statements
-    = statements statement
-    | statement
+    = statements toplevel_statement
+    | statements expression
+    | toplevel_statement
 
-statement
-    = raw_statement
-    | raw_statement discard_semicolon
-    | discard_semicolon
-    | raw_statement
+-toplevel_statement
+    = expression statement_separator
+    | statement_separator
 
--raw_statement
-    = expression
-    | SOURCE OPEN_PAR STRING CLOSE_PAR
-    | SOURCE OPEN_PAR STRING COMMA param_list CLOSE_PAR
+-statement
+    = source
     | if
     | for
     | return
     | while
-    | REPEAT statement
+    | repeat
+
+source
+    = SOURCE OPEN_PAR STRING CLOSE_PAR
+    | SOURCE OPEN_PAR STRING COMMA param_list CLOSE_PAR
+
+repeat
+    = REPEAT expression
 
 while
-    = WHILE OPEN_PAR expression CLOSE_PAR statement
+    = WHILE OPEN_PAR expression CLOSE_PAR expression
 
-if  = IF OPEN_PAR expression CLOSE_PAR statement
-    | IF OPEN_PAR expression CLOSE_PAR statement ELSE statement
+if  = IF OPEN_PAR expression CLOSE_PAR expression
+    | IF OPEN_PAR expression CLOSE_PAR expression ELSE expression
 
-for = FOR OPEN_PAR SYM IN expression CLOSE_PAR statement
+for = FOR OPEN_PAR SYM IN expression CLOSE_PAR expression
 
 return
     = RETURN OPEN_PAR expression CLOSE_PAR
+"""
+
+# Structure / Misc
+
++ """
+script
+    = statements
+
+statement_separator
+    = SEMICOLON
+    | NEWLINE
+
+subexpr
+    = OPEN_PAR expression CLOSE_PAR
 
 -expression_list
     = expression_list COMMA expression
@@ -190,4 +216,4 @@ return
 -name
     = SYM
     | STRING
-"""
+""")

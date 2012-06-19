@@ -112,6 +112,11 @@ r_scanner = (Scanner(**kw_dic)
                 .add(SYM=r'[.a-zA-Z_][.a-zA-Z0-9_]*')
                 .add(SPECIAL_OP=r'%[^%]*%')
                 #.add(WS='[ \t]+')
-                .add(WS='[ \t\r\n]+')
+                .add(NEWLINE=r'(?:\r\n|\n|\r)')
+                .add(WS='[ \t]+')
                 .add(comment='[#][^\n]*')
-                .add(discard_names=discard_them_all))
+                .add(discard_names=discard_them_all)
+                .state("subexpr", ['OPEN_PAR'], ['CLOSE_PAR'],
+                       discard_names=['NEWLINE'])
+                .state("indexing", ['OPEN_SQ'], ['CLOSE_SQ'],
+                       discard_names=['NEWLINE']))
