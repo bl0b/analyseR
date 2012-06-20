@@ -4,6 +4,7 @@ from scanneR import r_scanner
 from grammar import R_grammar
 from entities import *
 from entities import RentityMeta
+import os
 
 
 class ParseR(Automaton):
@@ -23,7 +24,6 @@ class ParseR(Automaton):
                 return Source(ast[3][1])
             elif ast[1][0] == 'IF':
                 return If(ast)
-        print "untransformed statement", ast
         return ast
 
     def scoped_atom(self, ast):
@@ -35,7 +35,16 @@ class ParseR(Automaton):
     def leftwards_assign(self, ast):
         return Assign(ast)
 
+    def toplevel_statement(self, ast):
+        print "toplevel_statement", ast
+        if len(ast) == 3:
+            return ast[1]
+        return tuple()
+
     def statement_separator(self, ast):
+        return tuple()
+
+    def discard_nls(self, ast):
         return tuple()
 
     def validate_ast(self, ast):
@@ -53,9 +62,11 @@ class ParseR(Automaton):
     def __call__(self, filename=None, text=None):
         if text is None and filename is not None:
             RContext.current_text.append(open(filename).read())
+            #RContext.current_dir.append(os.path.dirname(filename))
         elif text is not None:
             filename = '<text>'
             RContext.current_text.append(text)
+            #RContext.current_dir.append(RContext.current_dir[-1])
         else:
             return None
         print "Parsing", filename
@@ -68,10 +79,13 @@ class ParseR(Automaton):
             ret = None
         RContext.current_file.pop()
         RContext.current_text.pop()
+        #RContext.current_dir.pop()
         return ret
 
 #
 R = ParseR()
+
+print "LR conflicts", R.conflicts()
 
 
 def parse(filename=None, text=None):

@@ -1,3 +1,6 @@
+import os
+
+
 def find_closest_common_parent(patha, pathb):
     return reduce(lambda a, (pa, pb): pa == pb and pa or a,
                   izip(patha, pathb))
@@ -48,6 +51,8 @@ class Rentity(object):
         self.parent = p
 
     def __repr__(self):
+        if type(self).__str__ is object.__str__:
+            return object.__repr__(self)
         return str(self)
 
     def search_iter(self, predicate):
@@ -92,6 +97,7 @@ class Rentity(object):
                 return name
             name = name.name
         if hasattr(self, "names") and name in self.names:
+            print self, "has names and has", name, self.names[name]
             return self.names[name][-1]
         return None
 
@@ -119,18 +125,50 @@ class Name(Rentity):
         return ret
 
     def eval_to(self):
+        #print "eval_to   ", self
+        #print "| previous", self.previous
+        #print "|   parent", self.parent
+        # if name is scoped, then don't resolve. (external package)
         if self.visibility is not None:
+            #print "| => namespace."
             return self
-        p = self.previous
-        while p is not None:
+        # search for locally defined name (going back to beginning of script)
+        p = self
+        while p.previous is not None:
+            p = p.previous
+            #print "(previous) on", p
             r = p.resolve(self)
             if r is not None:
+                #print "| => found (in previous) !", r
                 return r
-            p = p.previous
+        # search in call stack
+        for p in reversed(RContext.call_resolution):
+            r = p.resolve(self)
+            if r is not None:
+                #print "| => found (in parent) !", r
+                return r
+        # search in parents
+        p = p.parent
+        while p is not None:
+            #print "(parent) on", p
+            r = p.resolve(self)
+            if r is not None:
+                #print "| => found (in parent) !", r
+                return r
+            p = p.parent
+        #print "| => failed."
         return self
+
+    def resolve(self, n):
+        if self is n:
+            return self
+        return None
 
     def __eq__(self, a):
         return (self.namespace == a.namespace and self.name == a.name)
+
+    def __hash__(self):
+        return hash(self.namespace) + hash(self.name)
 
 
 class Renv(object):
@@ -144,12 +182,20 @@ class Renv(object):
         else:
             self.names[name] = [value]
 
+    def resolve(self, name):
+        #print "resolution of", name, "in", self.names
+        if name in self.names:
+            return self.names[name][-1]
+        return None
+
 
 class RContext(object):
-    current_file = ['']   # implementing reentrant parses
-    current_text = []     #      //         //      //
-    parse = None          # shameful hack to prevent hard circular dependency.
-    call_resolution = []  # implementing call stack
+    current_file = ['']             # implementing reentrant parses
+    current_text = ['']             #      //         //      //
+    current_dir = [os.getcwd()]     #      //         //      //
+    parse = None                    # shameful hack to prevent hard
+                                    # circular dependency.
+    call_resolution = []            # implementing call stack
 
 
 class Statement(Rentity):
@@ -167,20 +213,34 @@ class AllIndices(Rentity):
 allindices = AllIndices()
 
 
+def wrap_previous(get_target):
+
+    def _set(s, v):
+        t = get_target(s)
+        if t is not None:
+            t.previous = v
+
+    def _get(s):
+        t = get_target(s)
+        return t and t.previous
+
+    return property(_get, _set)
+
+
 def extract_list(ast):
     ret = []
     on_comma = True
-    print "extract_list", ast
+    #print "extract_list", ast
     for a in ast:
-        print "extract_list on", a
+        #print "extract_list on", a
         if type(a) is tuple:
             if a[0] == 'COMMA':
                 if on_comma:
                     ret.append(allindices)
                 else:
                     on_comma = True
-            else:
-                print "extract_list on tuple", a
+            #else:
+            #    print "extract_list on tuple", a
         else:
             on_comma = False
             ret.append(a)

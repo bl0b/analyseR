@@ -97,7 +97,7 @@ for k, op in three_char.iteritems():
 #tokens['number'] = number
 #tokens['symbol'] = symbol_assert + r'\b[a-zA-Z_][a-zA-Z0-9_]*\b'
 
-discard_them_all = ['WS', 'comment']
+discard_them_all = ['WS']
 
 s1 = r'"(?:\\["bntr]|[^\\"])*"'
 s2 = r"'(?:\\['bntr]|[^\\'])*'"
@@ -112,9 +112,8 @@ r_scanner = (Scanner(**kw_dic)
                 .add(SYM=r'[.a-zA-Z_][.a-zA-Z0-9_]*')
                 .add(SPECIAL_OP=r'%[^%]*%')
                 #.add(WS='[ \t]+')
-                .add(NEWLINE=r'(?:\r\n|\n|\r)')
-                .add(WS='[ \t]+')
-                .add(comment='[#][^\n]*')
+                .add(NEWLINE=r'[\r\n]+')
+                .add(WS='(?:[ \t]|[#][^\n]*[\n]+)+')
                 .add(discard_names=discard_them_all)
                 .state("subexpr", ['OPEN_PAR'], ['CLOSE_PAR'],
                        discard_names=['NEWLINE'])

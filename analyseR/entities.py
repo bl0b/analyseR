@@ -8,36 +8,40 @@ __all__ = ['RContext', 'Rentity', 'AllIndices', 'Source', 'Function',
 
 from itertools import *
 from entities_base import *
-
-
-def wrap_previous(get_target):
-
-    def _set(s, v):
-        t = get_target(s)
-        if t is not None:
-            t.previous = v
-
-    def _get(s):
-        t = get_target(s)
-        return t and t.previous
-
-    return property(_get, _set)
+import os
 
 
 class Source(Rentity):
     entrails = ['contents']
     previous = wrap_previous(lambda s: s.contents)
 
-    def __init__(self, filename):
+    def __init__(self, ast):
         Rentity.__init__(self)
-        self.filename = filename
-        self.contents = RContext.parse(filename[1:-1])
+        self.filename = os.path.join(RContext.current_dir[-1], ast[3][1][1:-1])
+        print "Sourcing", self.filename
+        self.contents = RContext.parse(self.filename)
 
     def __str__(self):
         return 'Source(' + self.filename + ')'
 
     def eval_to(self):
-        return None
+        return self.contents.eval_to()
+
+    @property
+    def names(self):
+        return self.contents.names
+
+    def resolve(self, n):
+        return self.contents.resolve(n)
+
+    def __str__(self):
+        return ('Sourced_Script('
+                + str(len(self.contents.statements)) + ' statements)')
+
+    def set_parent(self, par):
+        Rentity.set_parent(self, par)
+        for name, value in self.names.iteritems():
+            par.reg_name(name, value)
 
 
 class Function(Renv, Rentity):
@@ -73,14 +77,14 @@ class Function(Renv, Rentity):
 class Assign(Statement):
     entrails = ['lhs', 'rhs']
 
-    def __new__(self, ast, rightwards=False):
-        if rightwards:
-            n, f = 3, 1
-        else:
-            n, f = 1, 3
-        #if type(ast[n]) is Name and type(ast[f]) is Function:
-        #    return ast[f].make_name(ast[n])
-        return Rentity.__new__(Assign)
+#    def __new__(self, ast, rightwards=False):
+#        if rightwards:
+#            n, f = 3, 1
+#        else:
+#            n, f = 1, 3
+#        #if type(ast[n]) is Name and type(ast[f]) is Function:
+#        #    return ast[f].make_name(ast[n])
+#        return Rentity.__new__(Assign)
 
     def __init__(self, ast, rightwards=False):
         Statement.__init__(self)
@@ -90,6 +94,7 @@ class Assign(Statement):
         else:
             self.lhs = ast[1]
             self.rhs = ast[3]
+        self.assign = ast[2][0]
 
     def __str__(self):
         return 'Assign(lhs=' + str(self.lhs) + ', rhs=' + str(self.rhs) + ')'
@@ -203,12 +208,11 @@ class Param(Rentity):
 
     def __init__(self, ast):
         Rentity.__init__(self)
-        if type(ast) is Assign:
-            # named parameter
-            self.name = ast.lhs
-            self.value = ast.rhs
+        #print "Param ast", ast
+        self.name = ast[1][1]
+        if len(ast) == 4:
+            self.value = ast[3]
         else:
-            self.name = ast[1][1]
             self.value = None
 
     def __str__(self):
@@ -224,16 +228,17 @@ class Param_list(Rentity):
 
     def __init__(self, ast):
         Rentity.__init__(self)
-        print "param list", ast
+        #print "param list", ast
         self.params = extract_list(ast[1:])
+        #print "param list", self.params
 
     def __str__(self):
         return 'ParamList(' + ', '.join(str(x) for x in self.params) + ')'
 
-    def set_parent(self, p):
-        Rentity.set_parent(self, p)
+    def set_parent(self, par):
+        Rentity.set_parent(self, par)
         for p in self.params:
-            p.reg_name(p.name, p)
+            par.reg_name(p.name, p)
 
 
 class Expression_list(Rentity):
@@ -241,11 +246,16 @@ class Expression_list(Rentity):
 
     def __init__(self, ast):
         Rentity.__init__(self)
-        print "expr list", ast
+        #print "expr list", ast
         self.expressions = extract_list(ast[1:])
+        #print "expr list", self.expressions
 
     def __str__(self):
-        return 'ExprList(' + ', '.join(str(x) for x in self.params) + ')'
+        return 'ExprList(' + ', '.join(str(x) for x in self.expressions) + ')'
+
+    def eval_to(self):
+        return Expression_list([None] + [p.eval_to()
+                                         for p in self.expressions])
 
 
 class Toplevel_expression(Statement):
@@ -267,7 +277,16 @@ class Toplevel_expression(Statement):
 
 
 class CallContext(Renv, Rentity):
-    pass
+
+    def __init__(self):
+        Renv.__init__(self)
+        Rentity.__init__(self)
+
+    def resolve(self, name):
+        #print "resolution of", name, "in (call context)", self.names
+        if name.name in self.names:
+            return self.names[name.name][-1]
+        return None
 
 
 class Call(Rentity):
@@ -286,24 +305,40 @@ class Call(Rentity):
     def eval_to(self):
         f = self.callee.eval_to()
         if f is self.callee:
-            return self
-        p = f.code.previous
+            par = []
+            for p in self.params.expressions:
+                if isinstance(p, Assign):
+                    par.append(Assign((None, p.lhs, p.assign, p.eval_to())))
+                else:
+                    par.append(p.eval_to())
+            return Call((None, self.callee, None, par))
+        #p = f.code.previous
         env = CallContext()
-        env.previous = self.previous
+        #env.previous = self.previous
         names = [p.name for p in f.params.params]
-        values = [p.value for p in f.params.params]
+        values = [[p.value] for p in f.params.params]
         for j, par in enumerate(self.params.expressions):
+            # FIXME : make some kind of NamedArgument to avoid
+            # conflicts when exporting the assigned name.
             if isinstance(par, Assign):
-                i = names.index(par.lhs.name)
+                if par.assign == 'EQUAL':
+                    i = names.index(par.lhs.name)
+                else:
+                    i = j
                 value = par.rhs.eval_to()
             else:
                 i = j
                 value = par.eval_to()
             values[i] = [value]
         env.names.update(izip(names, values))
-        f.code.previous = env
+        #print "Call context :"
+        #for n, v in env.names.iteritems():
+        #    print "    ", n, v
+        ##f.code.previous = env
+        RContext.call_resolution.append(env)
         ret = f.code.eval_to()
-        f.code.previous = p
+        RContext.call_resolution.pop()
+        #f.code.previous = p
         return ret
 
 
@@ -405,12 +440,13 @@ def _binop_prev_set(s, p):
 class BinOp(Rentity):
     entrails = ['operands']
 
-    previous = property(_binop_prev_get, _binop_prev_set)
+    previous = wrap_previous(lambda s: s.operands[0])
+    #previous = property(_binop_prev_get, _binop_prev_set)
 
     def __init__(self, ast):
         self.operator = ast[2][0]
         self.operands = ast[1::2]
-        print self.operands
+        #print self.operands
         self.operands[1].previous = self.operands[0]
 
     def __str__(self):

@@ -30,6 +30,11 @@
 # if (1) { 4 } else { 5 } + 10   => 4
 # if (0) { 4 } else { 5 } + 10   => 15
 
+# As a side note, the R grammar is really shitty, with contextuals tokens
+# like NEWLINE, transient in sub-expressions but used as a statement separator
+# within blocs.
+# only python is shittier to parse with a generalist algorithm.
+
 
 # Operator precedence
 
@@ -85,16 +90,11 @@ immed
     | function
     | bloc
 
-function
-    = FUNCTION OPEN_PAR param_list CLOSE_PAR expression
-    | FUNCTION OPEN_PAR CLOSE_PAR expression
-
-bloc
-    = OPEN_CURLY statements CLOSE_CURLY
-    | OPEN_CURLY CLOSE_CURLY
-
 param_list
-    = param_list COMMA param
+    = _plist_lp
+
+-_plist_lp
+    = _plist_lp COMMA param
     | param
 
 param
@@ -102,7 +102,7 @@ param
     | name
 
 exponentiation
-    = e2 CIRCONFLEX immed
+    = e2 CIRCONFLEX e1
 
 unary_plus_or_minus
     = PLUS e2
@@ -153,17 +153,36 @@ leftwards_assign
     | e12 LEFT_ARROW2 e13
     | e12 EQUAL e13
 
+function
+    = FUNCTION OPEN_PAR param_list CLOSE_PAR opt_nls expression
+    | FUNCTION OPEN_PAR CLOSE_PAR opt_nls expression
+
+bloc
+    = OPEN_CURLY statements CLOSE_CURLY
+    | OPEN_CURLY opt_nls CLOSE_CURLY
+
+-opt_nls
+    =| discard_nls
+
+discard_nls
+    = discard_nls NEWLINE
+    | NEWLINE
+
 """
 
 # Statements
 
 + """
 -statements
+    = _statements_lp
+    | expression
+
+-_statements_lp
     = statements toplevel_statement
     | statements expression
     | toplevel_statement
 
--toplevel_statement
+toplevel_statement
     = expression statement_separator
     | statement_separator
 
@@ -180,18 +199,19 @@ source
     | SOURCE OPEN_PAR STRING COMMA param_list CLOSE_PAR
 
 repeat
-    = REPEAT expression
+    = REPEAT opt_nls expression
 
 while
     = WHILE OPEN_PAR expression CLOSE_PAR expression
 
-if  = IF OPEN_PAR expression CLOSE_PAR expression
-    | IF OPEN_PAR expression CLOSE_PAR expression ELSE expression
+if  = IF opt_nls OPEN_PAR expression CLOSE_PAR opt_nls expression
+    | IF opt_nls OPEN_PAR expression CLOSE_PAR opt_nls expression opt_nls
+      ELSE opt_nls expression
 
-for = FOR OPEN_PAR SYM IN expression CLOSE_PAR expression
+for = FOR opt_nls OPEN_PAR SYM IN expression CLOSE_PAR opt_nls expression
 
 return
-    = RETURN OPEN_PAR expression CLOSE_PAR
+    = RETURN opt_nls OPEN_PAR expression CLOSE_PAR
 """
 
 # Structure / Misc
@@ -201,20 +221,29 @@ script
     = statements
 
 statement_separator
-    = SEMICOLON
+    = _sta_sep_lp
+
+-_sta_sep_lp
+    = _sta_sep_lp SEMICOLON
+    | _sta_sep_lp NEWLINE
+    | SEMICOLON
     | NEWLINE
 
 subexpr
     = OPEN_PAR expression CLOSE_PAR
 
 expression_list
-    = _elist
-
--_elist
-    = _elist COMMA expression
+    = _elist_lp
     | expression
-    | COMMA _elist
-    | _elist COMMA
+
+-_elist_lp
+    = _elist_lp expression
+    | _elist_lp COMMA
+    | _el_elem
+
+-_el_elem
+    = expression COMMA
+    | COMMA
 
 -name
     = SYM
