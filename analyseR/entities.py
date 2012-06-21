@@ -77,6 +77,17 @@ class Function(Renv, Rentity):
 class Assign(Statement):
     entrails = ['lhs', 'rhs']
 
+    def __set_previous(s, p):
+        if s.lhs:
+            s.lhs.previous = p
+        if s.rhs:
+            s.rhs.previous = p
+
+    def __get_previous(s):
+        return s.lhs and s.lhs.previous or None
+
+    previous = property(__get_previous, __set_previous)
+
 #    def __new__(self, ast, rightwards=False):
 #        if rightwards:
 #            n, f = 3, 1
@@ -100,7 +111,7 @@ class Assign(Statement):
         return 'Assign(lhs=' + str(self.lhs) + ', rhs=' + str(self.rhs) + ')'
 
     def eval_to(self):
-        return self.rhs
+        return self.rhs.eval_to()
 
     def set_parent(self, p):
         Statement.set_parent(self, p)
@@ -139,6 +150,13 @@ class Statements(Statement):
     def eval_to(self):
         return self.statements[-1].eval_to()
 
+    def resolve(self, n):
+        for s in reversed(self.statements):
+            r = s.resolve(n)
+            if r is not None:
+                return r
+        return None
+
 
 class Bloc(Statements):
 
@@ -155,11 +173,29 @@ class Bloc(Statements):
 class If(Statement):
     entrails = ['condition', 'then', 'els_']
 
+    def __get_previous(self):
+        return self.condition and self.condition.previous
+
+    def __set_previous(self, p):
+        if self.condition:
+            self.condition.previous = p
+        if self.then:
+            self.then.previous = p
+        if self.els_:
+            self.els_.previous = p
+
+    previous = property(__get_previous, __set_previous)
+
     def __init__(self, ast):
         Statement.__init__(self)
         #print "IF (ast)", ast
         self.condition = ast[3]
         self.then = ast[5]
+        if self.then == None:
+            raise Exception('IF ' + str(ast) + ' '
+                            + str(ast[3]) + ' '
+                            + str(ast[5]) + ' '
+                            + str(ast[7]))
         self.els_ = len(ast) == 8 and ast[7] or None
         #print "IF (properties)", self.condition, self.then, self.els_
 
@@ -170,6 +206,40 @@ class If(Statement):
             ret += ', else=' + str(self.els_)
         ret += ')'
         return ret
+
+    def resolve(self, n):
+        cond = self.condition.eval_to()
+        print "If eval cond to", cond
+        if isinstance(cond, Immed):
+            if cond.value():
+                return self.then.resolve(n)
+            elif self.els_:
+                return self.els_.resolve(n)
+        else:
+            ret = IfElse(self.previous, cond, self.then.resolve(n),
+                         self.els_ and self.els_.resolve(n))
+        return ret
+
+    def eval_to(self):
+        cond = self.condition.eval_to()
+        print self
+        if isinstance(cond, Immed):
+            if cond.value():
+                return self.then.eval_to()
+            elif self.els_:
+                return self.els_.eval_to()
+        else:
+            ret = IfElse(self.previous, cond, self.then.eval_to(),
+                         self.els_ and self.els_.eval_to())
+        return ret
+
+
+class IfElse(If):
+
+    def __init__(self, prev, cond, then, els_):
+        If.__init__(self, (None, None, None, cond,
+                           None, then, None, els_))
+        self.previous = prev
 
 
 class Return(Statement):
@@ -311,7 +381,8 @@ class Call(Rentity):
                     par.append(Assign((None, p.lhs, p.assign, p.eval_to())))
                 else:
                     par.append(p.eval_to())
-            return Call((None, self.callee, None, par))
+            return Call((None, self.callee, None, Expression_list([None]
+                                                                  + par)))
         #p = f.code.previous
         env = CallContext()
         #env.previous = self.previous
@@ -425,6 +496,7 @@ class Negation(Rentity):
     entrails = ['expression']
 
     def __init__(self, ast):
+        Rentity.__init__(self)
         self.expression = ast[2]
 
     def __str__(self):
@@ -445,6 +517,7 @@ class BinOp(Rentity):
     #previous = property(_binop_prev_get, _binop_prev_set)
 
     def __init__(self, ast):
+        Rentity.__init__(self)
         self.operator = ast[2][0]
         self.operands = ast[1::2]
         if type(self.operands[1]) is tuple:

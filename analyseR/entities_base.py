@@ -25,6 +25,15 @@ def _entrail_set(e):
     return _
 
 
+def call_dumper(cls, name):
+    m = getattr(cls, name)
+
+    def _ret(*a, **kw):
+        print "Calling %s.%s" % (cls.__name__, name)
+        return m(*a, **kw)
+    return _ret
+
+
 class RentityMeta(type):
     registry = {}
 
@@ -32,6 +41,7 @@ class RentityMeta(type):
         RentityMeta.registry[name.lower()] = cls
         for e in cls.entrails:
             setattr(cls, e, property(_entrail_get(e), _entrail_set(e)))
+        setattr(cls, 'eval_to', call_dumper(cls, "eval_to"))
 
 
 class Rentity(object):
@@ -125,38 +135,56 @@ class Name(Rentity):
         return ret
 
     def eval_to(self):
-        #print "eval_to   ", self
-        #print "| previous", self.previous
-        #print "|   parent", self.parent
+        print "eval_to   ", self
+        print "| previous", self.previous
+        print "|   parent", self.parent
         # if name is scoped, then don't resolve. (external package)
+
+        def _find(p):
+            while p.previous is not None:
+                p = p.previous
+                print "|    (previous) on", p
+                r = p.resolve(self)
+                if r is not None and r is not self:
+                    print "| => found (in previous) !", r
+                    return r.eval_to()
+            return None
+
         if self.visibility is not None:
-            #print "| => namespace."
+            print "| => namespace."
             return self
         # search for locally defined name (going back to beginning of script)
+        r = _find(self)
+        if r is not None:
+            return r
         p = self
         while p.previous is not None:
             p = p.previous
-            #print "(previous) on", p
-            r = p.resolve(self)
-            if r is not None:
-                #print "| => found (in previous) !", r
-                return r
+        #    print "|    (previous) on", p
+        #    r = p.resolve(self)
+        #    if r is not None and r is not self:
+        #        print "| => found (in previous) !", r
+        #        return r.eval_to()
         # search in call stack
         for p in reversed(RContext.call_resolution):
             r = p.resolve(self)
-            if r is not None:
-                #print "| => found (in parent) !", r
-                return r
+            if r is not None and r is not self:
+                print "| => found (in parent) !", r
+                return r.eval_to()
         # search in parents
         p = p.parent
         while p is not None:
-            #print "(parent) on", p
-            r = p.resolve(self)
-            if r is not None:
-                #print "| => found (in parent) !", r
-                return r
+            print "    (parent) on", p
+            if p:
+                r = _find(p)
+                if r is not None:
+                    return r
+            #r = p.resolve(self)
+            #if r is not None and r is not self:
+            #    print "| => found (in parent) !", r
+            #    return r.eval_to()
             p = p.parent
-        #print "| => failed."
+        print "| => failed."
         return self
 
     def resolve(self, n):
@@ -165,7 +193,10 @@ class Name(Rentity):
         return None
 
     def __eq__(self, a):
-        return (self.namespace == a.namespace and self.name == a.name)
+        if type(a) is type(self):
+            return (self.namespace == a.namespace and self.name == a.name)
+        else:
+            return False
 
     def __hash__(self):
         return hash(self.namespace) + hash(self.name)
@@ -178,7 +209,7 @@ class Renv(object):
 
     def reg_name(self, name, value):
         if name in self.names:
-            self.names[names].append(value)
+            self.names[name].append(value)
         else:
             self.names[name] = [value]
 
@@ -216,13 +247,19 @@ allindices = AllIndices()
 def wrap_previous(get_target):
 
     def _set(s, v):
-        t = get_target(s)
-        if t is not None:
-            t.previous = v
+        try:
+            t = get_target(s)
+            if t is not None:
+                t.previous = v
+        except:
+            pass
 
     def _get(s):
-        t = get_target(s)
-        return t and t.previous
+        try:
+            t = get_target(s)
+            return t and t.previous
+        except:
+            return None
 
     return property(_get, _set)
 
