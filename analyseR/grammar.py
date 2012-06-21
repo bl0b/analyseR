@@ -158,7 +158,7 @@ function
     | FUNCTION OPEN_PAR CLOSE_PAR opt_nls expression
 
 bloc
-    = OPEN_CURLY statements CLOSE_CURLY
+    = OPEN_CURLY opt_nls statements CLOSE_CURLY
     | OPEN_CURLY opt_nls CLOSE_CURLY
 
 -opt_nls
@@ -184,7 +184,6 @@ discard_nls
 
 toplevel_statement
     = expression statement_separator
-    | statement_separator
 
 -statement
     = source
@@ -205,7 +204,7 @@ while
     = WHILE OPEN_PAR expression CLOSE_PAR expression
 
 if  = IF opt_nls OPEN_PAR expression CLOSE_PAR opt_nls expression
-    | IF opt_nls OPEN_PAR expression CLOSE_PAR opt_nls expression opt_nls
+    | IF opt_nls OPEN_PAR expression CLOSE_PAR opt_nls expression
       ELSE opt_nls expression
 
 for = FOR opt_nls OPEN_PAR SYM IN expression CLOSE_PAR opt_nls expression
@@ -218,9 +217,14 @@ return
 
 + """
 script
-    = statements
+    = opt_nls statements
 
 statement_separator
+    = discard_nls
+    | SEMICOLON
+    | SEMICOLON discard_nls
+
+__statement_separator
     = _sta_sep_lp
 
 -_sta_sep_lp

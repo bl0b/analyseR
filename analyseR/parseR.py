@@ -36,8 +36,8 @@ class ParseR(Automaton):
         return Assign(ast)
 
     def toplevel_statement(self, ast):
-        print "toplevel_statement", ast
-        if len(ast) == 3:
+        #print "toplevel_statement", ast
+        if len(ast) > 1 and isinstance(ast[1], Rentity):
             return ast[1]
         return tuple()
 
@@ -85,7 +85,30 @@ class ParseR(Automaton):
 #
 R = ParseR()
 
-print "LR conflicts", R.conflicts()
+#print "LR conflicts", R.conflicts()
+
+conflicts = R.conflicts()
+
+if conflicts:
+    print "LR conflicts summary:"
+
+    def is_RR(c):
+        s, t = c
+        return reduce(lambda a, (ac, dest): a and ac == 'R',
+                      R.ACTION[s][t],
+                      True)
+
+    rr = len(filter(is_RR, conflicts))
+    print rr, "R/R conflicts"
+    print len(conflicts) - rr, "S/R conflicts"
+    states = set(c[0] for c in conflicts)
+    for st in states:
+        print R.itemsetstr(R.closure(R.LR0[st]), label=str(st))
+        for s, t in (c for c in conflicts if c[0] == st):
+            print "on", t
+            print "\n".join('   ' + str(a) + ' ' + (a == 'R' and R.R[d][0]
+                                                              or str(d))
+                            for (a, d) in R.ACTION[s][t])
 
 
 def parse(filename=None, text=None):

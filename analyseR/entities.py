@@ -18,7 +18,7 @@ class Source(Rentity):
     def __init__(self, ast):
         Rentity.__init__(self)
         self.filename = os.path.join(RContext.current_dir[-1], ast[3][1][1:-1])
-        print "Sourcing", self.filename
+        #print "Sourcing", self.filename
         self.contents = RContext.parse(self.filename)
 
     def __str__(self):
@@ -350,11 +350,12 @@ class Script(Renv, Statements):
 
 
 class For(Statement):
-    entrails = ['iteration', 'statement']
+    entrails = ['var', 'iteration', 'statement']
 
     def __init__(self, ast):
         Statement.__init__(self)
         self.iteration = ast[3:-2]
+        self.var = Name(ast[2:4])
         self.statement = ast[-1]
 
     def __str__(self):
@@ -446,7 +447,10 @@ class BinOp(Rentity):
     def __init__(self, ast):
         self.operator = ast[2][0]
         self.operands = ast[1::2]
-        #print self.operands
+        if type(self.operands[1]) is tuple:
+            print "BinOp"
+            print "   operator", self.operator
+            print "   operands", self.operands[0], self.operands[1]
         self.operands[1].previous = self.operands[0]
 
     def __str__(self):
@@ -521,6 +525,10 @@ class Exponentiation(BinOp):
 
 
 class Slot_extraction(BinOp):
+
+    def __init__(self, ast):
+        BinOp.__init__(self, ast[:-1] + (Name(ast[-2:]),))
+        #self.operands[1] = Name((None, (None, self.operands[1])))
 
     @property
     def name(self):
