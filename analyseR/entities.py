@@ -216,9 +216,16 @@ class If(Statement):
             elif self.els_:
                 return self.els_.resolve(n)
         else:
-            ret = IfElse(self.previous, cond, self.then.resolve(n),
-                         self.els_ and self.els_.resolve(n))
-        return ret
+            then = self.then and self.then.resolve(n)
+            els_ = self.els_ and self.els_.resolve(n)
+            if then is None:
+                if els_ is None:
+                    return None
+                elif isinstance(cond, Negation):
+                    return IfElse(self.previous, cond.expression, els_, None)
+                else:
+                    return IfElse(self.previous, Negation(cond), els_, None)
+            return IfElse(self.previous, cond, then, els_)
 
     def eval_to(self):
         cond = self.condition.eval_to()
