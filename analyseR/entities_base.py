@@ -1,4 +1,5 @@
 import os
+import sys
 
 
 def find_closest_common_parent(patha, pathb):
@@ -25,12 +26,21 @@ def _entrail_set(e):
     return _
 
 
+___indent = 0
+
+
 def call_dumper(cls, name):
     m = getattr(cls, name)
 
     def _ret(*a, **kw):
-        print "Calling %s.%s" % (cls.__name__, name)
-        return m(*a, **kw)
+        global ___indent
+        print >> sys.stderr, "%sCalling %s.%s" % (' ' * ___indent,
+                                                  cls.__name__, name), a, kw
+        ___indent += 2
+        ret = m(*a, **kw)
+        ___indent -= 2
+        print >> sys.stderr, "%s=>" % (' ' * ___indent), ret
+        return ret
     return _ret
 
 
@@ -41,7 +51,8 @@ class RentityMeta(type):
         RentityMeta.registry[name.lower()] = cls
         for e in cls.entrails:
             setattr(cls, e, property(_entrail_get(e), _entrail_set(e)))
-        setattr(cls, 'eval_to', call_dumper(cls, "eval_to"))
+        #setattr(cls, 'eval_to', call_dumper(cls, "eval_to"))
+        #setattr(cls, 'resolve', call_dumper(cls, "resolve"))
 
 
 class Rentity(object):
@@ -65,7 +76,9 @@ class Rentity(object):
             return object.__repr__(self)
         return str(self)
 
-    def search_iter(self, predicate):
+    def search_iter(self, predicate, forbid=[]):
+        if type(self) in forbid:
+            return
         if predicate(self):
             yield self
         for e in self.entrails:
@@ -76,10 +89,10 @@ class Rentity(object):
                         if predicate(k):
                             yield k
                         continue
-                    for result in k.search_iter(predicate):
+                    for result in k.search_iter(predicate, forbid):
                         yield result
             elif isinstance(x, Rentity):
-                for result in x.search_iter(predicate):
+                for result in x.search_iter(predicate, forbid):
                     yield result
 
     def get_filename(self):
@@ -107,7 +120,7 @@ class Rentity(object):
                 return name
             name = name.name
         if hasattr(self, "names") and name in self.names:
-            print self, "has names and has", name, self.names[name]
+            #print self, "has names and has", name, self.names[name]
             return self.names[name][-1]
         return None
 
@@ -135,56 +148,48 @@ class Name(Rentity):
         return ret
 
     def eval_to(self):
-        print "eval_to   ", self
-        print "| previous", self.previous
-        print "|   parent", self.parent
+        #print "eval_to   ", self
+        #print "| previous", self.previous
+        #print "|   parent", self.parent
         # if name is scoped, then don't resolve. (external package)
 
-        def _find(p):
-            while p.previous is not None:
-                p = p.previous
-                print "|    (previous) on", p
-                r = p.resolve(self)
-                if r is not None and r is not self:
-                    print "| => found (in previous) !", r
-                    return r.eval_to()
-            return None
+        #def _find(p):
+        #    while p.previous is not None:
+        #        p = p.previous
+        #        #print "|    (previous) on", p
+        #        r = p.resolve(self)
+        #        if r is not None and r is not self:
+        #            #print "| => found (in previous) !", r
+        #            return r.eval_to()
+        #    return None
 
         if self.visibility is not None:
-            print "| => namespace."
+            #print "| => namespace."
             return self
         # search for locally defined name (going back to beginning of script)
-        r = _find(self)
-        if r is not None:
-            return r
-        p = self
-        while p.previous is not None:
+        #r = _find(self)
+        #if r is not None:
+        #    return r
+        tmp = self
+        p = self.previous
+        while p is not None:
+            tmp = p
+            r = p.resolve(self)
+            if r is not None and r is not self:
+                return r.eval_to()
             p = p.previous
-        #    print "|    (previous) on", p
-        #    r = p.resolve(self)
-        #    if r is not None and r is not self:
-        #        print "| => found (in previous) !", r
-        #        return r.eval_to()
-        # search in call stack
         for p in reversed(RContext.call_resolution):
             r = p.resolve(self)
             if r is not None and r is not self:
-                print "| => found (in parent) !", r
+                #print "| => found (in call stack) !", r
                 return r.eval_to()
-        # search in parents
-        p = p.parent
+        p = tmp.parent and tmp.parent.previous
         while p is not None:
-            print "    (parent) on", p
-            if p:
-                r = _find(p)
-                if r is not None:
-                    return r
-            #r = p.resolve(self)
-            #if r is not None and r is not self:
-            #    print "| => found (in parent) !", r
-            #    return r.eval_to()
-            p = p.parent
-        print "| => failed."
+            r = p.resolve(self)
+            if r is not None and r is not self:
+                return r.eval_to()
+            p = p.previous or p.parent
+        #print "| => failed."
         return self
 
     def resolve(self, n):

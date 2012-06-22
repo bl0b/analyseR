@@ -1,7 +1,7 @@
 __all__ = ['RContext', 'Rentity', 'AllIndices', 'Source', 'Function',
-           'Assign', 'Statements', 'Bloc', 'If', 'Return', 'Immed',
-           'Name', 'Param', 'Param_list', 'Call', 'Script', 'For',
-           'While', 'Repeat', 'Subexpr', 'Unary_plus_or_minus',
+           'Assign', 'Statements', 'Bloc', 'If', 'IfElse', 'Return',
+           'Immed', 'Name', 'Param', 'Param_list', 'Call', 'Script',
+           'For', 'While', 'Repeat', 'Subexpr', 'Unary_plus_or_minus',
            'Indexing', 'Negation', 'BinOp', 'Sequence', 'Addsub',
            'Special_op', 'Muldiv', 'Comparison', 'Bool_and', 'Bool_or',
            'Formula', 'Exponentiation', 'Slot_extraction']
@@ -52,7 +52,7 @@ class Function(Renv, Rentity):
         Rentity.__init__(self)
         self.ast = ast
         self.code = ast[-1]
-        self.params = ast[-3]
+        self.params = isinstance(ast[-3], Param_list) and ast[-3] or None
         #self.name = None
         lineno = RContext.current_text[-1][:ast[1][2]].count('\n') + 1
         self.name = Name((tuple(),
@@ -70,8 +70,8 @@ class Function(Renv, Rentity):
     #    ret.name = name
     #    return ret
 
-    def eval_to(self):
-        return self.code.eval_to()
+    #def eval_to(self):
+    #    return self.code.eval_to()
 
 
 class Assign(Statement):
@@ -179,10 +179,6 @@ class If(Statement):
     def __set_previous(self, p):
         if self.condition:
             self.condition.previous = p
-        if self.then:
-            self.then.previous = p
-        if self.els_:
-            self.els_.previous = p
 
     previous = property(__get_previous, __set_previous)
 
@@ -197,10 +193,15 @@ class If(Statement):
                             + str(ast[5]) + ' '
                             + str(ast[7]))
         self.els_ = len(ast) == 8 and ast[7] or None
+        if self.then:
+            self.then.previous = self.condition
+        if self.els_:
+            self.els_.previous = self.condition
         #print "IF (properties)", self.condition, self.then, self.els_
 
     def __str__(self):
-        ret = 'If(condition=' + str(self.condition)
+        ret = type(self).__name__
+        ret += '(condition=' + str(self.condition)
         ret += ', then=' + str(self.then)
         if self.els_ is not None:
             ret += ', else=' + str(self.els_)
@@ -209,7 +210,7 @@ class If(Statement):
 
     def resolve(self, n):
         cond = self.condition.eval_to()
-        print "If eval cond to", cond
+        #print "[resolve] If eval cond to", cond
         if isinstance(cond, Immed):
             if cond.value():
                 return self.then.resolve(n)
@@ -229,7 +230,7 @@ class If(Statement):
 
     def eval_to(self):
         cond = self.condition.eval_to()
-        print self
+        #print "[eval_to] If eval cond to", cond
         if isinstance(cond, Immed):
             if cond.value():
                 return self.then.eval_to()
@@ -244,6 +245,9 @@ class If(Statement):
 class IfElse(If):
 
     def __init__(self, prev, cond, then, els_):
+        #print "IfElse", prev, cond, then, els_
+        if isinstance(cond, bool):
+            raise Exception()
         If.__init__(self, (None, None, None, cond,
                            None, then, None, els_))
         self.previous = prev
@@ -373,23 +377,24 @@ class Call(Rentity):
     def __init__(self, ast):
         Rentity.__init__(self)
         self.callee = ast[1]
-        self.params = ast[3]
+        self.params = isinstance(ast[3], Rentity) and ast[3] or None
 
     def __str__(self):
         return ('Call(callee=' + str(self.callee) + ', params='
                 + str(self.params) + ')')
 
-    def eval_to(self):
-        f = self.callee.eval_to()
-        if f is self.callee:
-            par = []
-            for p in self.params.expressions:
-                if isinstance(p, Assign):
-                    par.append(Assign((None, p.lhs, p.assign, p.eval_to())))
-                else:
-                    par.append(p.eval_to())
-            return Call((None, self.callee, None, Expression_list([None]
-                                                                  + par)))
+    def _eval_call(self, f):
+        #print "EVAL CALL", f
+        if isinstance(f, IfElse):
+            t = f.then and f.then.eval_to()
+            e = f.els_ and f.els_.eval_to()
+            #print "t", t
+            #print "e", e
+            return IfElse(f.previous, f.condition,
+                          (isinstance(t, Function) or isinstance(t, IfElse))
+                          and self._eval_call(t) or t,
+                          (isinstance(e, Function) or isinstance(e, IfElse))
+                          and self._eval_call(e) or e)
         #p = f.code.previous
         env = CallContext()
         #env.previous = self.previous
@@ -419,6 +424,19 @@ class Call(Rentity):
         #f.code.previous = p
         return ret
 
+    def eval_to(self):
+        f = self.callee.eval_to()
+        if f is self.callee:
+            par = []
+            for p in self.params.expressions:
+                if isinstance(p, Assign):
+                    par.append(Assign((None, p.lhs, p.assign, p.eval_to())))
+                else:
+                    par.append(p.eval_to())
+            return Call((None, self.callee, None,
+                         Expression_list([None] + par)))
+        return self._eval_call(f)
+
 
 class Script(Renv, Statements):
 
@@ -432,8 +450,10 @@ class For(Statement):
 
     def __init__(self, ast):
         Statement.__init__(self)
-        self.iteration = ast[3:-2]
+        #self.iteration = ast[3:-2]
+        self.iteration = ast[-3]
         self.var = Name(ast[2:4])
+        print 'For', self.iteration, self.var
         self.statement = ast[-1]
 
     def __str__(self):
@@ -480,10 +500,17 @@ class Unary_plus_or_minus(Rentity):
         return Rentity.__new__(self)
 
     def __init__(self, ast):
+        Rentity.__init__(self)
         self.expression = ast[2]
 
     def __str__(self):
         return 'Minus(' + str(self.expression) + ')'
+
+    def eval_to(self):
+        x = self.expression.eval_to()
+        if isinstance(x, Immed) and x.typ == 'NUM':
+            v = - x.value()
+            return Immed((None, ('NUM', str(v))))
 
 
 class Indexing(Rentity):
@@ -508,6 +535,17 @@ class Negation(Rentity):
 
     def __str__(self):
         return 'Not(' + str(self.expression) + ')'
+
+    def eval_to(self):
+        x = self.expression.eval_to()
+        if isinstance(x, Name) and x.visibility is None:
+            if x.name in ('T', 'TRUE'):
+                return Immed((None, ('NUM', '0')))
+            elif x.name in ('F', 'FALSE'):
+                return Immed((None, ('NUM', '1')))
+        if isinstance(x, Immed) and x.typ == 'NUM':
+            return Immed((None, ('NUM', x.value() and '0' or '1')))
+        return Negation((None, None, x))
 
 
 _binop_prev_get = lambda s: s.operands[0].previous
