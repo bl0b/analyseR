@@ -4,11 +4,101 @@ __all__ = ['RContext', 'Rentity', 'AllIndices', 'Source', 'Function',
            'For', 'While', 'Repeat', 'Subexpr', 'Unary_plus_or_minus',
            'Indexing', 'Negation', 'BinOp', 'Sequence', 'Addsub',
            'Special_op', 'Muldiv', 'Comparison', 'Bool_and', 'Bool_or',
-           'Formula', 'Exponentiation', 'Slot_extraction']
+           'Formula', 'Exponentiation', 'Slot_extraction', 'Any']
 
 from itertools import *
 from entities_base import *
 import os
+
+
+class Name(Rentity):
+
+    def __init__(self, ast):
+        Rentity.__init__(self)
+        if len(ast) == 4:
+            self.namespace = type(ast[1]) is tuple and ast[1][1] or ast[1]
+            self.visibility = ast[2][1]
+            self.name = ast[3][1]
+        else:
+            self.namespace = None
+            self.visibility = None
+            self.name = ast[1][1]
+
+    def __str__(self):
+        ret = 'Name('
+        if self.namespace is not None:
+            ret += str(self.namespace)
+            ret += self.visibility
+        ret += self.name
+        ret += ')'
+        return ret
+
+    def eval_to(self):
+        defs = self - Any // Assign(lhs=lambda x: type(x) is Name
+                                                  and x == self)
+        if len(defs) == 0:
+            return self
+        if len(defs) > 1:
+            return strip_common_path(*defs)
+        return defs[0].rhs
+
+#        #print "eval_to   ", self
+#        #print "| previous", self.previous
+#        #print "|   parent", self.parent
+#        # if name is scoped, then don't resolve. (external package)
+#
+#        #def _find(p):
+#        #    while p.previous is not None:
+#        #        p = p.previous
+#        #        #print "|    (previous) on", p
+#        #        r = p.resolve(self)
+#        #        if r is not None and r is not self:
+#        #            #print "| => found (in previous) !", r
+#        #            return r.eval_to()
+#        #    return None
+#
+#        if self.visibility is not None:
+#            #print "| => namespace."
+#            return self
+#        # search for locally defined name (going back to beginning of script)
+#        #r = _find(self)
+#        #if r is not None:
+#        #    return r
+#        tmp = self
+#        p = self.previous
+#        while p is not None:
+#            tmp = p
+#            r = p.resolve(self)
+#            if r is not None and r is not self:
+#                return r.eval_to()
+#            p = p.previous
+#        for p in reversed(RContext.call_resolution):
+#            r = p.resolve(self)
+#            if r is not None and r is not self:
+#                #print "| => found (in call stack) !", r
+#                return r.eval_to()
+#        p = tmp.parent and tmp.parent.previous
+#        while p is not None:
+#            r = p.resolve(self)
+#            if r is not None and r is not self:
+#                return r.eval_to()
+#            p = p.previous or p.parent
+#        #print "| => failed."
+#        return self
+
+    def resolve(self, n):
+        if self is n:
+            return self
+        return None
+
+    def __eq__(self, a):
+        if type(a) is type(self):
+            return (self.namespace == a.namespace and self.name == a.name)
+        else:
+            return False
+
+    def __hash__(self):
+        return hash(self.namespace) + hash(self.name)
 
 
 class Source(Rentity):
@@ -325,9 +415,22 @@ class Param_list(Rentity):
 class Expression_list(Rentity):
     entrails = ['expressions']
 
+    def __set_p(self, p):
+        self._prev = p
+        if not self.expressions:
+            return
+        for e in self.expressions:
+            e.previous = p
+
+    def __get_p(self):
+        return self._prev
+
+    previous = property(__get_p, __set_p)
+
     def __init__(self, ast):
         Rentity.__init__(self)
         #print "expr list", ast
+        self._prev = None
         self.expressions = extract_list(ast[1:])
         #print "expr list", self.expressions
 
@@ -378,10 +481,58 @@ class Call(Rentity):
         Rentity.__init__(self)
         self.callee = ast[1]
         self.params = isinstance(ast[3], Rentity) and ast[3] or None
+        if self.params:
+            self.params.previous = self.callee
 
     def __str__(self):
         return ('Call(callee=' + str(self.callee) + ', params='
                 + str(self.params) + ')')
+
+#    def _eval_call(self, f):
+#        #print "EVAL CALL", f
+#        if isinstance(f, IfElse):
+#            t = f.then and f.then.eval_to()
+#            e = f.els_ and f.els_.eval_to()
+#            #print "t", t
+#            #print "e", e
+#            return IfElse(f.previous, f.condition,
+#                          (isinstance(t, Function) or isinstance(t, IfElse))
+#                          and self._eval_call(t) or t,
+#                          (isinstance(e, Function) or isinstance(e, IfElse))
+#                          and self._eval_call(e) or e)
+#        #p = f.code.previous
+#        env = CallContext()
+#        #env.previous = self.previous
+#        names = [p.name for p in f.params.params]
+#        values = [[p.value] for p in f.params.params]
+#        for j, par in enumerate(self.params.expressions):
+#            # FIXME : make some kind of NamedArgument to avoid
+#            # conflicts when exporting the assigned name.
+#            if isinstance(par, Assign):
+#                if par.assign == 'EQUAL':
+#                    i = names.index(par.lhs.name)
+#                else:
+#                    i = j
+#                value = par.rhs.eval_to()
+#            else:
+#                i = j
+#                value = par.eval_to()
+#            values[i] = [value]
+#        env.names.update(izip(names, values))
+#        #print "Call context :"
+#        #for n, v in env.names.iteritems():
+#        #    print "    ", n, v
+#        backup = f.code.previous
+#        env.previous = (RContext.call_resolution
+#                        and RContext.call_resolution[-1]
+#                        or None)
+#        f.code.previous = env
+#        ##f.code.previous = env
+#        RContext.call_resolution.append(env)
+#        ret = f.code.eval_to()
+#        RContext.call_resolution.pop()
+#        f.code.previous = backup
+#        return ret
 
     def _eval_call(self, f):
         #print "EVAL CALL", f
@@ -396,10 +547,9 @@ class Call(Rentity):
                           (isinstance(e, Function) or isinstance(e, IfElse))
                           and self._eval_call(e) or e)
         #p = f.code.previous
-        env = CallContext()
         #env.previous = self.previous
         names = [p.name for p in f.params.params]
-        values = [[p.value] for p in f.params.params]
+        values = [p.value for p in f.params.params]
         for j, par in enumerate(self.params.expressions):
             # FIXME : make some kind of NamedArgument to avoid
             # conflicts when exporting the assigned name.
@@ -412,16 +562,28 @@ class Call(Rentity):
             else:
                 i = j
                 value = par.eval_to()
-            values[i] = [value]
-        env.names.update(izip(names, values))
+            values[i] = value
+        #env.names.update(izip(names, values))
+        print names
+        print values
+        env = Statements([Assign((None, Name((None, (None, n))),
+                                 ('LEFT_ARROW',),
+                                 v))
+                          for n, v in izip(names, values)])
+        print env
         #print "Call context :"
         #for n, v in env.names.iteritems():
         #    print "    ", n, v
-        ##f.code.previous = env
+        backup = f.code.previous
+        env.previous = (RContext.call_resolution
+                        and RContext.call_resolution[-1]
+                        or None)
+        f.code.previous = env.statements and env.statements[-1] or env.previous
         RContext.call_resolution.append(env)
+        print str(env.statements)
         ret = f.code.eval_to()
         RContext.call_resolution.pop()
-        #f.code.previous = p
+        f.code.previous = backup
         return ret
 
     def eval_to(self):
@@ -453,7 +615,7 @@ class For(Statement):
         #self.iteration = ast[3:-2]
         self.iteration = ast[-3]
         self.var = Name(ast[2:4])
-        print 'For', self.iteration, self.var
+        #print 'For', self.iteration, self.var
         self.statement = ast[-1]
 
     def __str__(self):

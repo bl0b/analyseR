@@ -2,15 +2,94 @@ import os
 import sys
 
 
+def strip_common_path(*ents):
+    i = -1
+    paths = zip(*[e.get_path() for e in ents])
+    for p in paths:
+        if reduce(lambda a, b: a is b and a or None, p) is not None:
+            i += 1
+        else:
+            break
+    return paths[i][0]
+
+
 def find_closest_common_parent(patha, pathb):
     return reduce(lambda a, (pa, pb): pa == pb and pa or a,
                   izip(patha, pathb))
 
 
-_entrail_get = lambda e: lambda self: getattr(self, '_' + e)
+#_entrail_get = lambda e: lambda self: getattr(self, '_' + e)
+
+class Path(object):
+
+    def __init__(self, ev=None, it=None, pr=None, **kw):
+        if not kw:
+            self.x = {'e': ev, 'i': it, 'p': pr}
+        else:
+            check = lambda e, k, v: hasattr(e, k) and v(getattr(e, k))
+            self.x = {'e': lambda e: e,
+                      'i': lambda e: (e,),
+                      'p': lambda e: reduce(lambda a, b: a and check(e, *b),
+                                            kw.iteritems(),
+                                            True)}
+
+    def search(self, ent):
+        return (self.x['e'](x)
+                for x in self.x['i'](ent)
+                if self.x['p'](x))
+
+    def __div__(pa, pb):
+        return Path(pb.x['e'],
+                    lambda ent: (r
+                                 for x in pa.search(ent)
+                                 for r in x.children()),
+                    pb.x['p'])
+
+    def __floordiv__(pa, pb):
+        return Path(pb.x['e'],
+                    lambda ent: (r
+                                 for x in pa.search(ent)
+                                 for r in x.deep()),
+                    pb.x['p'])
+
+    def __getattr__(pa, attr):
+        return Path(lambda ent: getattr(pa.x['e'](ent), attr),
+                    pa.x['i'],
+                    lambda ent: pa.x['p'](ent) and hasattr(ent, attr))
+
+    def __getitem__(pa, idx):
+        return Path(lambda ent: ent[idx],
+                    pa.x['i'],
+                    lambda ent: pa.x['p'](ent) and hasattr(ent, '__getitem__'))
+
+    def __sub__(pa, pb):
+        return Path(pb.x['e'],
+                    lambda ent: ent.before(),
+                    pb.x['p'])
+
+    def __neg__(pa):
+        return Path(pa.x['e'],
+                    pa.x['i'],
+                    lambda ent: not pa.x['p'](ent))
+
+
+def _entrail_get(e):
+    ename = e
+    e = '_' + e
+
+    def _(self):
+        x = getattr(self, e)
+#        if isinstance(x, tuple):
+#            return RProxyTuple(ename, x)
+#        elif isinstance(x, list):
+#            return RProxyList(ename, x)
+        return x
+
+    return _
 
 
 def _entrail_set(e):
+    e = '_' + e
 
     def _(self, v):
         if type(v) in (list, tuple):
@@ -19,11 +98,51 @@ def _entrail_set(e):
                     x.set_parent(self)
         elif isinstance(v, Rentity):
             v.set_parent(self)
-        setattr(self, '_' + e, v)
+        setattr(self, e, v)
         #print "set entrail", e, v, getattr(self, '_' + e)
         return v
 
     return _
+
+
+class Rentrail(property, Path):
+
+    def __init__(self, cls, name):
+        property.__init__(self, _entrail_get(name), _entrail_set(name))
+        Path.__init__(self,
+                      lambda ent: getattr(ent, name),
+                      lambda ent: (ent,),
+                      lambda ent: isinstance(ent, cls) and hasattr(ent, name))
+        #self.owner = None
+        self.name = name
+        self.cls = cls
+
+    #def before(self):
+    #    p = self.owner.previous
+    #    while p:
+    #        yield p
+    #        p = p.previous
+
+    #def above(self):
+    #    p = self.owner.parent
+    #    while p:
+    #        yield p
+    #        p = p.parent
+
+    def children(self):
+        return iter(self)
+
+    def deep(self):
+        return (x
+                for c in self
+                for x in c.search_iter(lambda x: True)
+                if isinstance(c, Rentity))
+
+    def _expr(self, x):
+        return getattr(x, self.name)
+
+    def _validate(self, x):
+        return type(x) is self.cls
 
 
 ___indent = 0
@@ -44,24 +163,40 @@ def call_dumper(cls, name):
     return _ret
 
 
-class RentityMeta(type):
+class RentityMeta(type, Path):
     registry = {}
 
     def __init__(cls, name, bases, dic):
+        Path.__init__(cls,
+                      lambda e: e,
+                      lambda e: (e,),
+                      lambda e: isinstance(e, cls))
         RentityMeta.registry[name.lower()] = cls
         for e in cls.entrails:
-            setattr(cls, e, property(_entrail_get(e), _entrail_set(e)))
+            setattr(cls, e, Rentrail(cls, e))
         #setattr(cls, 'eval_to', call_dumper(cls, "eval_to"))
         #setattr(cls, 'resolve', call_dumper(cls, "resolve"))
+
+    def _expr(self, x):
+        return x
+
+    def _validate(self, x):
+        return type(x) is self
 
 
 class Rentity(object):
     __metaclass__ = RentityMeta
     entrails = []
 
+    def __new__(cls, *a, **kw):
+        if kw and not a:
+            return Path(**kw)
+        return object.__new__(cls)
+
     def __init__(self):
         for e in self.entrails:
             setattr(self, '_' + e, None)
+            #getattr(self, e).owner = self
         self.filename = RContext.current_file[-1]
         self.parent = None
         self.previous = None
@@ -95,6 +230,27 @@ class Rentity(object):
                 for result in x.search_iter(predicate, forbid):
                     yield result
 
+    def children(self):
+        return (x
+                for e in self.entrails
+                for ent in (getattr(self, e),)
+                for x in (isinstance(ent, Rentity) and (ent,) or ent))
+
+    def deep(self):
+        return (self.search_iter(lambda x: True))
+
+    def before(self):
+        p = self.previous
+        while p:
+            yield p
+            p = p.previous
+
+    def above(self):
+        p = self.parent
+        while p:
+            yield p
+            p = p.parent
+
     def get_filename(self):
         if hasattr(self, 'filename'):
             return self.filename
@@ -124,87 +280,44 @@ class Rentity(object):
             return self.names[name][-1]
         return None
 
+    def __iter__(self):
+        return (getattr(self, x) for x in self.entrails)
 
-class Name(Rentity):
+    def __div__(self, what):
+        return [x for c in self.children() for x in what.search(c)]
 
-    def __init__(self, ast):
+    def __floordiv__(self, what):
+        return [x for c in self.deep() for x in what.search(c)]
+
+    def __sub__(self, what):
+        return [x for c in self.before() for x in what.search(c)]
+
+
+Any = Path(lambda e: e, lambda e: (e,), lambda e: True)
+
+
+class RProxy(Rentity):
+
+    def __init__(self, name):
         Rentity.__init__(self)
-        if len(ast) == 4:
-            self.namespace = type(ast[1]) is tuple and ast[1][1] or ast[1]
-            self.visibility = ast[2][1]
-            self.name = ast[3][1]
-        else:
-            self.namespace = None
-            self.visibility = None
-            self.name = ast[1][1]
+        self._name = name
 
-    def __str__(self):
-        ret = 'Name('
-        if self.namespace is not None:
-            ret += str(self.namespace)
-            ret += self.visibility
-        ret += self.name
-        ret += ')'
-        return ret
 
-    def eval_to(self):
-        #print "eval_to   ", self
-        #print "| previous", self.previous
-        #print "|   parent", self.parent
-        # if name is scoped, then don't resolve. (external package)
+class RProxyList(list, RProxy):
 
-        #def _find(p):
-        #    while p.previous is not None:
-        #        p = p.previous
-        #        #print "|    (previous) on", p
-        #        r = p.resolve(self)
-        #        if r is not None and r is not self:
-        #            #print "| => found (in previous) !", r
-        #            return r.eval_to()
-        #    return None
+    def __init__(self, name, l):
+        list.__init__(self, l)
+        RProxy.__init__(self, name)
 
-        if self.visibility is not None:
-            #print "| => namespace."
-            return self
-        # search for locally defined name (going back to beginning of script)
-        #r = _find(self)
-        #if r is not None:
-        #    return r
-        tmp = self
-        p = self.previous
-        while p is not None:
-            tmp = p
-            r = p.resolve(self)
-            if r is not None and r is not self:
-                return r.eval_to()
-            p = p.previous
-        for p in reversed(RContext.call_resolution):
-            r = p.resolve(self)
-            if r is not None and r is not self:
-                #print "| => found (in call stack) !", r
-                return r.eval_to()
-        p = tmp.parent and tmp.parent.previous
-        while p is not None:
-            r = p.resolve(self)
-            if r is not None and r is not self:
-                return r.eval_to()
-            p = p.previous or p.parent
-        #print "| => failed."
-        return self
 
-    def resolve(self, n):
-        if self is n:
-            return self
-        return None
+class RProxyTuple(tuple, RProxy):
 
-    def __eq__(self, a):
-        if type(a) is type(self):
-            return (self.namespace == a.namespace and self.name == a.name)
-        else:
-            return False
+    def __new__(cls, name, t):
+        return tuple.__new__(cls, t)
 
-    def __hash__(self):
-        return hash(self.namespace) + hash(self.name)
+    def __init__(self, name, t):
+        tuple.__init__(self)
+        RProxy.__init__(self, name)
 
 
 class Renv(object):
@@ -227,8 +340,8 @@ class Renv(object):
 
 class RContext(object):
     current_file = ['']             # implementing reentrant parses
-    current_text = ['']             #      //         //      //
-    current_dir = [os.getcwd()]     #      //         //      //
+    current_text = ['']             # //   //         //      //
+    current_dir = [os.getcwd()]     # //   //         //      //
     parse = None                    # shameful hack to prevent hard
                                     # circular dependency.
     call_resolution = []            # implementing call stack
