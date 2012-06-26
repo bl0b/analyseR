@@ -5,13 +5,30 @@ from grammar import R_grammar
 from entities import *
 from entities import RentityMeta
 import os
+import cPickle
+
+
+ANALYZERCACHEDIR = os.path.join(os.getenv('HOME'), '.analyzeRcache')
+ANALYZERCACHE_GRAMMAR = os.path.join(ANALYZERCACHEDIR, 'R_grammar')
+ANALYZERCACHE_PARSER = os.path.join(ANALYZERCACHEDIR, 'parser.pkl')
+
+if not os.path.isdir(ANALYZERCACHEDIR):
+    os.makedirs(ANALYZERCACHEDIR)
+
+if os.path.exists(ANALYZERCACHE_GRAMMAR):
+    analyzeRcached_grammar = open(ANALYZERCACHE_GRAMMAR).read()
+else:
+    analyzeRcached_grammar = ''
 
 
 class ParseR(Automaton):
 
     def __init__(self):
+        from time import time
+        t0 = time()
         Automaton.__init__(self, "script", R_grammar, r_scanner)
         self.resolve_SR_conflicts(favor='S')
+        self.build_time = time() - t0
         #self.debug = True
 
     def statement(self, ast):
@@ -83,32 +100,51 @@ class ParseR(Automaton):
         return ret
 
 #
-R = ParseR()
 
-#print "LR conflicts", R.conflicts()
 
-conflicts = R.conflicts()
+def init_parser():
+    R = ParseR()
 
-if conflicts:
-    print "LR conflicts summary:"
+    #print "LR conflicts", R.conflicts()
 
-    def is_RR(c):
-        s, t = c
-        return reduce(lambda a, (ac, dest): a and ac == 'R',
-                      R.ACTION[s][t],
-                      True)
+    conflicts = R.conflicts()
 
-    rr = len(filter(is_RR, conflicts))
-    print rr, "R/R conflicts"
-    print len(conflicts) - rr, "S/R conflicts"
-    states = set(c[0] for c in conflicts)
-    for st in states:
-        print R.itemsetstr(R.closure(R.LR0[st]), label=str(st))
-        for s, t in (c for c in conflicts if c[0] == st):
-            print "on", t
-            print "\n".join('   ' + str(a) + ' ' + (a == 'R' and R.R[d][0]
-                                                              or str(d))
-                            for (a, d) in R.ACTION[s][t])
+    if conflicts:
+        print "LR conflicts summary:"
+
+        def is_RR(c):
+            s, t = c
+            return reduce(lambda a, (ac, dest): a and ac == 'R',
+                          R.ACTION[s][t],
+                          True)
+
+        rr = len(filter(is_RR, conflicts))
+        print rr, "R/R conflicts"
+        print len(conflicts) - rr, "S/R conflicts"
+        states = set(c[0] for c in conflicts)
+        for st in states:
+            print R.itemsetstr(R.closure(R.LR0[st]), label=str(st))
+            for s, t in (c for c in conflicts if c[0] == st):
+                print "on", t
+                print "\n".join('   ' + str(a) + ' ' + (a == 'R' and R.R[d][0]
+                                                                  or str(d))
+                                for (a, d) in R.ACTION[s][t])
+    return R
+
+
+cache_is_valid = ((analyzeRcached_grammar == R_grammar)
+                  and os.path.isfile(ANALYZERCACHE_PARSER))
+
+if cache_is_valid:
+    R = cPickle.load(open(ANALYZERCACHE_PARSER))
+    print "Reusing cached parser"
+else:
+    open(ANALYZERCACHE_GRAMMAR, 'w').write(R_grammar)
+    R = init_parser()
+    print "Built parser in", R.build_time, 'seconds'
+    print "Unused rules :", R.unused_rules
+    print len(R.conflicts()), "conflicts."
+    cPickle.dump(R, open(ANALYZERCACHE_PARSER, 'w'), 2)
 
 
 def parse(filename=None, text=None):
