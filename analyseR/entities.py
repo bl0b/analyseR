@@ -11,96 +11,6 @@ from entities_base import *
 import os
 
 
-class Name(Rentity):
-
-    def __init__(self, ast):
-        Rentity.__init__(self)
-        if len(ast) == 4:
-            self.namespace = type(ast[1]) is tuple and ast[1][1] or ast[1]
-            self.visibility = ast[2][1]
-            self.name = ast[3][1]
-        else:
-            self.namespace = None
-            self.visibility = None
-            self.name = ast[1][1]
-
-    def __str__(self):
-        ret = 'Name('
-        if self.namespace is not None:
-            ret += str(self.namespace)
-            ret += self.visibility
-        ret += self.name
-        ret += ')'
-        return ret
-
-    def eval_to(self):
-        defs = self - Any // Assign(lhs=lambda x: type(x) is Name
-                                                  and x == self)
-        if len(defs) == 0:
-            return self
-        if len(defs) > 1:
-            return strip_common_path(*defs)
-        return defs[0].rhs
-
-#        #print "eval_to   ", self
-#        #print "| previous", self.previous
-#        #print "|   parent", self.parent
-#        # if name is scoped, then don't resolve. (external package)
-#
-#        #def _find(p):
-#        #    while p.previous is not None:
-#        #        p = p.previous
-#        #        #print "|    (previous) on", p
-#        #        r = p.resolve(self)
-#        #        if r is not None and r is not self:
-#        #            #print "| => found (in previous) !", r
-#        #            return r.eval_to()
-#        #    return None
-#
-#        if self.visibility is not None:
-#            #print "| => namespace."
-#            return self
-#        # search for locally defined name (going back to beginning of script)
-#        #r = _find(self)
-#        #if r is not None:
-#        #    return r
-#        tmp = self
-#        p = self.previous
-#        while p is not None:
-#            tmp = p
-#            r = p.resolve(self)
-#            if r is not None and r is not self:
-#                return r.eval_to()
-#            p = p.previous
-#        for p in reversed(RContext.call_resolution):
-#            r = p.resolve(self)
-#            if r is not None and r is not self:
-#                #print "| => found (in call stack) !", r
-#                return r.eval_to()
-#        p = tmp.parent and tmp.parent.previous
-#        while p is not None:
-#            r = p.resolve(self)
-#            if r is not None and r is not self:
-#                return r.eval_to()
-#            p = p.previous or p.parent
-#        #print "| => failed."
-#        return self
-
-    def resolve(self, n):
-        if self is n:
-            return self
-        return None
-
-    def __eq__(self, a):
-        if type(a) is type(self):
-            return (self.namespace == a.namespace and self.name == a.name)
-        else:
-            return False
-
-    def __hash__(self):
-        return hash(self.namespace) + hash(self.name)
-
-
 class Source(Rentity):
     entrails = ['contents']
     previous = wrap_previous(lambda s: s.contents)
@@ -164,55 +74,6 @@ class Function(Renv, Rentity):
     #    return self.code.eval_to()
 
 
-class Assign(Statement):
-    entrails = ['lhs', 'rhs']
-
-    def __set_previous(s, p):
-        if s.lhs:
-            s.lhs.previous = p
-        if s.rhs:
-            s.rhs.previous = p
-
-    def __get_previous(s):
-        return s.lhs and s.lhs.previous or None
-
-    previous = property(__get_previous, __set_previous)
-
-#    def __new__(self, ast, rightwards=False):
-#        if rightwards:
-#            n, f = 3, 1
-#        else:
-#            n, f = 1, 3
-#        #if type(ast[n]) is Name and type(ast[f]) is Function:
-#        #    return ast[f].make_name(ast[n])
-#        return Rentity.__new__(Assign)
-
-    def __init__(self, ast, rightwards=False):
-        Statement.__init__(self)
-        if rightwards:
-            self.lhs = ast[3]
-            self.rhs = ast[1]
-        else:
-            self.lhs = ast[1]
-            self.rhs = ast[3]
-        self.assign = ast[2][0]
-
-    def __str__(self):
-        return 'Assign(lhs=' + str(self.lhs) + ', rhs=' + str(self.rhs) + ')'
-
-    def eval_to(self):
-        return self.rhs.eval_to()
-
-    def set_parent(self, p):
-        Statement.set_parent(self, p)
-        self.reg_name(self.lhs, self.rhs)
-
-    def resolve(self, name):
-        if self.lhs == name:
-            return self.rhs
-        return None
-
-
 _prev_get = lambda s: len(s.statements) and s.statements[0].previous or None
 
 
@@ -247,6 +108,9 @@ class Statements(Statement):
                 return r
         return None
 
+    def __getitem__(self, i):
+        return self.statements[i]
+
 
 class Bloc(Statements):
 
@@ -256,91 +120,13 @@ class Bloc(Statements):
         self.has_return = returns and returns[0] or None
 
     def eval_to(self):
-        return (self.has_return and self.has_return.eval_to()
-                or self.statements[-1])
-
-
-class If(Statement):
-    entrails = ['condition', 'then', 'els_']
-
-    def __get_previous(self):
-        return self.condition and self.condition.previous
-
-    def __set_previous(self, p):
-        if self.condition:
-            self.condition.previous = p
-
-    previous = property(__get_previous, __set_previous)
-
-    def __init__(self, ast):
-        Statement.__init__(self)
-        #print "IF (ast)", ast
-        self.condition = ast[3]
-        self.then = ast[5]
-        if self.then == None:
-            raise Exception('IF ' + str(ast) + ' '
-                            + str(ast[3]) + ' '
-                            + str(ast[5]) + ' '
-                            + str(ast[7]))
-        self.els_ = len(ast) == 8 and ast[7] or None
-        if self.then:
-            self.then.previous = self.condition
-        if self.els_:
-            self.els_.previous = self.condition
-        #print "IF (properties)", self.condition, self.then, self.els_
-
-    def __str__(self):
-        ret = type(self).__name__
-        ret += '(condition=' + str(self.condition)
-        ret += ', then=' + str(self.then)
-        if self.els_ is not None:
-            ret += ', else=' + str(self.els_)
-        ret += ')'
-        return ret
-
-    def resolve(self, n):
-        cond = self.condition.eval_to()
-        #print "[resolve] If eval cond to", cond
-        if isinstance(cond, Immed):
-            if cond.value():
-                return self.then.resolve(n)
-            elif self.els_:
-                return self.els_.resolve(n)
-        else:
-            then = self.then and self.then.resolve(n)
-            els_ = self.els_ and self.els_.resolve(n)
-            if then is None:
-                if els_ is None:
-                    return None
-                elif isinstance(cond, Negation):
-                    return IfElse(self.previous, cond.expression, els_, None)
-                else:
-                    return IfElse(self.previous, Negation(cond), els_, None)
-            return IfElse(self.previous, cond, then, els_)
-
-    def eval_to(self):
-        cond = self.condition.eval_to()
-        #print "[eval_to] If eval cond to", cond
-        if isinstance(cond, Immed):
-            if cond.value():
-                return self.then.eval_to()
-            elif self.els_:
-                return self.els_.eval_to()
-        else:
-            ret = IfElse(self.previous, cond, self.then.eval_to(),
-                         self.els_ and self.els_.eval_to())
-        return ret
-
-
-class IfElse(If):
-
-    def __init__(self, prev, cond, then, els_):
-        #print "IfElse", prev, cond, then, els_
-        if isinstance(cond, bool):
-            raise Exception()
-        If.__init__(self, (None, None, None, cond,
-                           None, then, None, els_))
-        self.previous = prev
+        if self.has_return:
+            return self.has_return.eval_to()
+        for s in reversed(self.statements):
+            ret = s.eval_to()
+            if ret is not None:
+                return ret
+        return None
 
 
 class Return(Statement):
@@ -355,23 +141,6 @@ class Return(Statement):
 
     def eval_to(self):
         return self.expression
-
-
-class Immed(Rentity):
-
-    def __init__(self, ast):
-        Rentity.__init__(self)
-        self.typ = ast[1][0]
-        self.val = ast[1][1]
-
-    def __str__(self):
-        return str(self.typ) + '(' + str(self.val) + ')'
-
-    def value(self):
-        if self.typ == "STRING":
-            return self.val
-        elif self.typ == "NUM":
-            return float(self.val)
 
 
 class Param(Rentity):
@@ -534,7 +303,7 @@ class Call(Rentity):
 #        f.code.previous = backup
 #        return ret
 
-    def _eval_call(self, f):
+    def _eval_call(self, f, what):
         #print "EVAL CALL", f
         if isinstance(f, IfElse):
             t = f.then and f.then.eval_to()
@@ -543,50 +312,60 @@ class Call(Rentity):
             #print "e", e
             return IfElse(f.previous, f.condition,
                           (isinstance(t, Function) or isinstance(t, IfElse))
-                          and self._eval_call(t) or t,
+                          and self._eval_call(t, what) or t,
                           (isinstance(e, Function) or isinstance(e, IfElse))
-                          and self._eval_call(e) or e)
+                          and self._eval_call(e, what) or e)
         #p = f.code.previous
         #env.previous = self.previous
-        names = [p.name for p in f.params.params]
-        values = [p.value for p in f.params.params]
-        for j, par in enumerate(self.params.expressions):
-            # FIXME : make some kind of NamedArgument to avoid
-            # conflicts when exporting the assigned name.
-            if isinstance(par, Assign):
-                if par.assign == 'EQUAL':
-                    i = names.index(par.lhs.name)
+        if not f.params:
+            names = []
+            values = []
+        else:
+            names = [p.name for p in f.params.params]
+            values = [p.value for p in f.params.params]
+            for j, par in enumerate(self.params.expressions):
+                # FIXME : make some kind of NamedArgument to avoid
+                # conflicts when exporting the assigned name.
+                if isinstance(par, Assign):
+                    if par.assign == 'EQUAL':
+                        i = names.index(par.lhs.name)
+                    else:
+                        i = j
+                    value = par.rhs.eval_to()
                 else:
                     i = j
-                value = par.rhs.eval_to()
-            else:
-                i = j
-                value = par.eval_to()
-            values[i] = value
+                    value = par.eval_to()
+                values[i] = value
         #env.names.update(izip(names, values))
-        print names
-        print values
+        #print names
+        #print values
+        code = type(f.code) is Bloc and f.code or [f.code]
         env = Statements([Assign((None, Name((None, (None, n))),
                                  ('LEFT_ARROW',),
                                  v))
-                          for n, v in izip(names, values)])
-        print env
+                          for n, v in izip(names, values)]
+                          + code)
+        print env.statements
         #print "Call context :"
         #for n, v in env.names.iteritems():
         #    print "    ", n, v
-        backup = f.code.previous
-        env.previous = (RContext.call_resolution
-                        and RContext.call_resolution[-1]
-                        or None)
-        f.code.previous = env.statements and env.statements[-1] or env.previous
+        #backup = f.code.previous
+        #env.previous = (RContext.call_resolution
+        #                and RContext.call_resolution[-1]
+        #                or None)
+        env.previous = self.previous
+       #f.code.previous = env.statements and env.statements[-1] or env.previous
         RContext.call_resolution.append(env)
-        print str(env.statements)
-        ret = f.code.eval_to()
+        #print str(env.statements)
+        ret = what(env)
         RContext.call_resolution.pop()
-        f.code.previous = backup
+        #f.code.previous = backup
         return ret
 
     def eval_to(self):
+        return self.eval_call(lambda env: env.eval_to())
+
+    def eval_call(self, what):
         f = self.callee.eval_to()
         if f is self.callee:
             par = []
@@ -597,10 +376,12 @@ class Call(Rentity):
                     par.append(p.eval_to())
             return Call((None, self.callee, None,
                          Expression_list([None] + par)))
-        return self._eval_call(f)
+        return self._eval_call(f, what)
 
 
 class Script(Renv, Statements):
+
+    previous = Statements.previous
 
     def __init__(self, ast):
         Renv.__init__(self)
@@ -610,13 +391,18 @@ class Script(Renv, Statements):
 class For(Statement):
     entrails = ['var', 'iteration', 'statement']
 
+    previous = wrap_previous(lambda s: s.iter_resolve)
+
     def __init__(self, ast):
         Statement.__init__(self)
         #self.iteration = ast[3:-2]
         self.iteration = ast[-3]
         self.var = Name(ast[2:4])
         #print 'For', self.iteration, self.var
+        self.iter_resolve = Assign((None, self.var,
+                                    ('LEFT_ARROW',), self.iteration))
         self.statement = ast[-1]
+        self.statement.previous = self.iter_resolve
 
     def __str__(self):
         return ('For(iteration=' + str(self.iteration)
@@ -678,10 +464,13 @@ class Unary_plus_or_minus(Rentity):
 class Indexing(Rentity):
     entrails = ['collection', 'indices']
 
+    previous = wrap_previous(lambda s: s.collection)
+
     def __init__(self, ast):
         Rentity.__init__(self)
         self.collection = ast[1]
-        self.indices = extract_list(ast[2:-1])
+        self.indices = Expression_list([None] + extract_list(ast[2:-1]))
+        self.indices.previous = self.collection
 
     def __str__(self):
         return ('Indexing(coll=' + str(self.collection) + ', indices=('
