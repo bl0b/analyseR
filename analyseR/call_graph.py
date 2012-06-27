@@ -5,6 +5,150 @@ import sys
 import os
 
 
+def find_func_parent(e):
+    p = e.get_path()
+    for x in reversed(p):
+        if type(x) is Function:
+            # return assigned name if it exists, file:line otherwise
+            if type(x.parent) is Assign:
+                return x.parent.lhs.name
+            return x.name
+    return 'script:' + p[0].get_filename()
+
+
+def pp(x):
+    if type(x) is Call and type(x.callee) is Name and x.callee.name == 'paste':
+        # special case : we keep strings and sep argument,
+        # and everything else is *.
+        ret = []
+        sep = " "  # R's default value
+        for p in x.params.expressions:
+            if type(p) is Assign and p.lhs.name == 'sep':
+                sep = p.rhs.eval_to().value()
+        for p in x.params.expressions:
+            if type(p) is Assign and p.lhs.name == 'sep':
+                continue
+            if type(p) is Immed:
+                ret.append(p.value())
+            else:
+                ret.append('*')
+        return sep.join(ret)
+
+    else:
+        return x.pp()
+
+
+def find_calls_by_name(s, start):
+    clist = list(s // Call(callee=lambda x: type(x) is Name
+                                            and x.name.startswith(start)
+                                            and x.eval_to() is x))
+    return [(find_func_parent(c), c) for c in clist]
+
+
+def process_read(r):
+    fname = reduce(lambda a, b: type(b) is Assign
+                                and type(b.lhs) is Name
+                                and b.lhs.name == 'file'
+                                and b
+                                or a,
+                                r.params.expressions)
+    return (r.callee.name,
+           pp((type(fname) is Assign and fname.rhs or fname).eval_to()))
+
+
+def process_write(w):
+    print w
+    fname = reduce(lambda a, b: type(b) is Assign
+                                and type(b.lhs) is Name
+                                and b.lhs.name == 'file'
+                                and b.rhs
+                                or a,
+                                w.params.expressions[1:])
+    return (w.callee.name, w.params.expressions[0].pp(),
+            pp((type(fname) is Assign and fname.rhs or fname).eval_to()))
+
+
+def process_reads(s):
+    return map(lambda (p, r): (p,) + process_read(r),
+               find_calls_by_name(s, "read."))
+
+
+def process_writes(s):
+    return map(lambda (p, w): (p,) + process_write(w),
+               find_calls_by_name(s, "write."))
+
+
+def process_call(c):
+    return c.callee.eval_to()
+
+
+def process_calls(s):
+    return map(lambda c: (find_func_parent(c), process_call(c)), s // Call)
+
+
+def io_nodes(s):
+    return {'reads': process_reads(s), 'writes': process_writes(s)}
+
+
+def io_graph(s):
+    reads = process_reads(s)
+    writes = process_writes(s)
+
+    import pygraphviz as pgv
+    g = pgv.AGraph(directed=True)
+    for whence, how, from_ in reads:
+        g.add_node(str(whence), label=str(whence), shape="rectangle")
+        g.add_node(str(from_), label=str(from_), shape="ellipse")
+        g.add_edge(str(from_), str(whence), label=str(how))
+    for whence, how, what, into in writes:
+        g.add_node(str(whence), label=str(whence), shape="rectangle")
+        g.add_node(str(into), label=str(into), shape="ellipse")
+        g.add_edge(str(whence), str(into), label=str(how) + '('
+                                                 + str(what) + ')')
+    return g
+
+
+
+#writes = [(a.rhs, a.get_filename()) for w in (s // (Call(callee=lambda x:
+#type(x) is Name and x.name.startswith('write.')))) for a in
+#(w//Assign(lhs=lambda x: x.name=='file'))]
+
+
+def toplevel_calls(e):
+    return list(s // Call(parent=lambda x: x is not None
+                                             and not list(x ** Function)))
+
+
+cond_num = 0
+
+
+def make_cond_name():
+    global cond_num
+    cond_num += 1
+    return '..cond.expr.' + str(cond_num)
+
+
+def expand_ifelse(ifelse):
+    cond = make_cond_name()
+    sta = [None, Assign((None, Name(cond), ('LEFT_ARROW',), ifelse.condition))]
+    if isinstance(ifelse.then, Statements):
+        sta += [IfElse(None, Name(cond),
+                       x, None)
+                for x in ifelse.then.statements]
+    else:
+        sta += [IfElse(None, Name(cond),
+                       ifelse.then, None)]
+    if isinstance(ifelse.els_, Statements):
+        sta += [IfElse(None, Negation((None, None, Name(cond))),
+                       x, None)
+                for x in ifelse.els_.statements]
+    elif ifelse.els_:
+        sta += [IfElse(None, Negation((None, None, Name(cond))),
+                       ifelse.els_, None)]
+    print sta
+    return Bloc(sta)
+
+
 def get_context(r):
     while True:
         if type(r) in (Function, Script):
