@@ -1,3 +1,6 @@
+__all__ = ['io_graph', 'process_reads', 'process_writes', 'process_calls',
+           'io_nodes', 'call_nodes', 'all_nodes']
+
 from parseR import parse
 from entities import *
 from itertools import *
@@ -13,7 +16,7 @@ def find_func_parent(e):
             if type(x.parent) is Assign:
                 return x.parent.lhs.name
             return x.name
-    return 'script:' + p[0].get_filename()
+    return 'script:' + e.get_filename()
 
 
 def pp(x):
@@ -45,7 +48,19 @@ def find_calls_by_name(s, start):
     return [(find_func_parent(c), c) for c in clist]
 
 
+_wheel_count = 0
+_wheel = ['-', '\\', '|', '/', '-', '\\', '|', '/']
+
+
+def wheel():
+    global _wheel_count, _wheel
+    w = _wheel[_wheel_count]
+    _wheel_count = (_wheel_count + 1) & 7
+    sys.stdout.write(w + '\r')
+
+
 def process_read(r):
+    wheel()
     fname = reduce(lambda a, b: type(b) is Assign
                                 and type(b.lhs) is Name
                                 and b.lhs.name == 'file'
@@ -57,7 +72,7 @@ def process_read(r):
 
 
 def process_write(w):
-    print w
+    wheel()
     fname = reduce(lambda a, b: type(b) is Assign
                                 and type(b.lhs) is Name
                                 and b.lhs.name == 'file'
@@ -79,15 +94,44 @@ def process_writes(s):
 
 
 def process_call(c):
-    return c.callee.eval_to()
+    wheel()
+
+    def extract_fnames(e):
+        if isinstance(e, Function):
+            return (e.name.name,)
+        elif isinstance(e, IfElse):
+            return extract_fnames(e.then) + extract_fnames(e.els_)
+        return tuple()
+
+    return (find_func_parent(c),
+            c.callee,
+            extract_fnames(c.callee.eval_to()))
 
 
 def process_calls(s):
-    return map(lambda c: (find_func_parent(c), process_call(c)), s // Call)
+    return map(process_call, s // Call)
+
+
+def call_nodes(s):
+    c = set(process_calls(s))
+    hc = set(k for k in c if k[2])
+    nc = set(chain((k[0] for k in hc),
+                   (k[1].name for k in hc)))
+    return {'calls': c, 'here_calls': hc, 'nc': nc}
 
 
 def io_nodes(s):
-    return {'reads': process_reads(s), 'writes': process_writes(s)}
+    rd = process_reads(s)
+    wr = process_writes(s)
+    nr = set(k[0] for k in rd)
+    nw = set(k[0] for k in wr)
+    return {'reads': rd, 'writes': wr, 'nr': nr, 'nw': nw}
+
+
+def all_nodes(s):
+    ret = io_nodes(s)
+    ret.update(call_nodes(s))
+    return ret
 
 
 def io_graph(s):
@@ -106,12 +150,6 @@ def io_graph(s):
         g.add_edge(str(whence), str(into), label=str(how) + '('
                                                  + str(what) + ')')
     return g
-
-
-
-#writes = [(a.rhs, a.get_filename()) for w in (s // (Call(callee=lambda x:
-#type(x) is Name and x.name.startswith('write.')))) for a in
-#(w//Assign(lhs=lambda x: x.name=='file'))]
 
 
 def toplevel_calls(e):

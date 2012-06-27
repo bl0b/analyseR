@@ -867,10 +867,10 @@ class If(Statement):
                 if els_ is None:
                     return None
                 elif isinstance(cond, Negation):
-                    return IfElse(self.previous, cond.expression, els_, None)
+                    return IfElse(self, cond.expression, els_, None)
                 else:
-                    return IfElse(self.previous, Negation(cond), els_, None)
-            return IfElse(self.previous, cond, then, els_)
+                    return IfElse(self, Negation(cond), els_, None)
+            return IfElse(self, cond, then, els_)
 
     def eval_to(self):
         cond = self.condition.eval_to()
@@ -881,13 +881,13 @@ class If(Statement):
             elif self.els_:
                 return self.els_.eval_to()
         else:
-            return IfElse(self.previous, cond, self.then.eval_to(),
+            return IfElse(self, cond, self.then.eval_to(),
                           self.els_ and self.els_.eval_to())
 
 
 class IfElse(If):
 
-    def __init__(self, prev, cond, then, els_):
+    def __init__(self, ref, cond, then, els_):
         #print "IfElse", prev, cond, then, els_
         if isinstance(cond, bool):
             raise Exception()
@@ -896,10 +896,11 @@ class IfElse(If):
         #print "els_", els_
         If.__init__(self, (None, None, None, cond,
                            None, then, None, els_))
-        self.previous = prev
+        self.previous = ref.previous
+        self.parent = ref.parent
 
     def copy(self):
-        return IfElse(self.previous,
+        return IfElse(self,
                       self.condition.copy(),
                       self.then.copy(),
                       self.els_ and self.els_.copy())

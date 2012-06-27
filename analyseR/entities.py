@@ -275,7 +275,7 @@ class Call(Rentity):
 #            e = f.els_ and f.els_.eval_to()
 #            #print "t", t
 #            #print "e", e
-#            return IfElse(f.previous, f.condition,
+#            return IfElse(f, f.condition,
 #                          (isinstance(t, Function) or isinstance(t, IfElse))
 #                          and self._eval_call(t) or t,
 #                          (isinstance(e, Function) or isinstance(e, IfElse))
@@ -321,7 +321,7 @@ class Call(Rentity):
             e = f.els_ and f.els_.eval_to()
             #print "t", t
             #print "e", e
-            return IfElse(f.previous, f.condition,
+            return IfElse(f, f.condition,
                           (isinstance(t, Function) or isinstance(t, IfElse))
                           and self._eval_call(t, what) or t,
                           (isinstance(e, Function) or isinstance(e, IfElse))
