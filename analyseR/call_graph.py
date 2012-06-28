@@ -15,8 +15,13 @@ def find_func_parent(e):
             # return assigned name if it exists, file:line otherwise
             if type(x.parent) is Assign:
                 return x.parent.lhs.name
+            print "found function but not in assign",
+            print path_str(p[:p.index(x) + 1])
             return x.name
-    return 'script:' + e.get_filename()
+    print "didn't find any function in path", path_str(p)
+    ret = 'script:' + e.get_filename()
+    print "...", ret
+    return ret
 
 
 def pp(x):
@@ -121,7 +126,9 @@ def call_nodes(s):
 
 
 def io_nodes(s):
+    print "Searching for reads..."
     rd = process_reads(s)
+    print "Searching for writes..."
     wr = process_writes(s)
     nr = set(k[0] for k in rd)
     nw = set(k[0] for k in wr)
@@ -130,6 +137,7 @@ def io_nodes(s):
 
 def all_nodes(s):
     ret = io_nodes(s)
+    print "Searching for calls..."
     ret.update(call_nodes(s))
     return ret
 

@@ -6,7 +6,7 @@ __all__ = ['RContext', 'Rentity', 'AllIndices', 'Source', 'Function',
            'Special_op', 'Muldiv', 'Comparison', 'Bool_and', 'Bool_or',
            'Formula', 'Exponentiation', 'Slot_extraction', 'Any',
            'Expression_list',
-           'strip_common_path']
+           'strip_common_path', 'path_str']
 
 from itertools import *
 from entities_base import *
@@ -76,19 +76,20 @@ class Function(Renv, Rentity):
     #    return self.code.eval_to()
 
 
-_prev_get = lambda s: len(s.statements) and s.statements[0].previous or None
-
-
-def _prev_set(s, v):
-    if s.statements is None or not len(s.statements):
-        return
-    s.statements[0].previous = v
+#_prev_get = lambda s: len(s.statements) and s.statements[0].previous or None
+#
+#
+#def _prev_set(s, v):
+#    if s.statements is None or not len(s.statements):
+#        return
+#    s.statements[0].previous = v
 
 
 class Statements(Statement):
     entrails = ['statements']
 
-    previous = property(_prev_get, _prev_set)
+    #previous = property(_prev_get, _prev_set)
+    previous = wrap_previous(lambda s: s.statements and s.statements[0])
 
     def __init__(self, statements):
         Statement.__init__(self, statements)
@@ -133,6 +134,8 @@ class Bloc(Statements):
 
 class Return(Statement):
     entrails = ['expression']
+
+    previous = wrap_previous(lambda s: s.expression)
 
     def __init__(self, ast):
         Statement.__init__(self, ast)
@@ -186,23 +189,15 @@ class Param_list(Rentity):
 class Expression_list(Rentity):
     entrails = ['expressions']
 
-    def __set_p(self, p):
-        self._prev = p
-        if not self.expressions:
-            return
-        for e in self.expressions:
-            e.previous = p
-
-    def __get_p(self):
-        return self._prev
-
-    previous = property(__get_p, __set_p)
+    previous = wrap_previous(lambda s: s.expressions and s.expressions[0])
 
     def __init__(self, ast):
         Rentity.__init__(self, ast)
         #print "expr list", ast
-        self._prev = None
+        #self._prev = None
         self.expressions = extract_list(ast[1:])
+        for i in xrange(1, len(self.expressions)):
+            self.expressions[i].previous = self.expressions[i - 1]
         #print "expr list", self.expressions
 
     def __str__(self):
@@ -356,7 +351,7 @@ class Call(Rentity):
                                  v.copy()))
                           for n, v in izip(names, values)]
                           + code)
-        print env.statements
+        #print env.statements
         #print "Call context :"
         #for n, v in env.names.iteritems():
         #    print "    ", n, v
@@ -415,6 +410,8 @@ class For(Statement):
                                     ('LEFT_ARROW',), self.iteration.copy()))
         self.statement = ast[-1]
         self.statement.previous = self.iter_resolve
+        self.var.previous = self.iter_resolve
+        self.iteration.previous = self.iter_resolve
 
     def __str__(self):
         return ('For(iteration=' + str(self.iteration)
@@ -423,11 +420,13 @@ class For(Statement):
 
 class While(Statement):
     entrails = ['condition', 'statement']
+    previous = wrap_previous(lambda s: s.condition)
 
     def __init__(self, ast):
         Statement.__init__(self, ast)
-        self.condition = ast[3:-2]
+        self.condition = ast[-3]
         self.statement = ast[-1]
+        self.statement.previous = self.condition
 
     def __str__(self):
         return ('While(condition=' + str(self.condition)
@@ -436,6 +435,7 @@ class While(Statement):
 
 class Repeat(Statement):
     entrails = ['statement']
+    previous = wrap_previous(lambda s: s.statement)
 
     def __init__(self, ast):
         Statement.__init__(self, ast)
@@ -453,6 +453,7 @@ class Subexpr(Rentity):
 
 class Unary_plus_or_minus(Rentity):
     entrails = ['expression']
+    previous = wrap_previous(lambda s: s.expression)
 
     def __new__(self, ast):
         if ast[1][0] == 'PLUS':
@@ -478,25 +479,29 @@ class Unary_plus_or_minus(Rentity):
 
 class Indexing(Rentity):
     entrails = ['collection', 'indices']
-
     previous = wrap_previous(lambda s: s.collection)
 
     def __init__(self, ast):
         Rentity.__init__(self, ast)
         self.collection = ast[1]
-        self.indices = Expression_list([None] + extract_list(ast[2:-1]))
+        self.indices = ast[-2]
         self.indices.previous = self.collection
+        #print "INDEXING", ast
+        #print self.collection, self.indices.previous
 
     def __str__(self):
         return ('Indexing(coll=' + str(self.collection) + ', indices=('
                 + ', '.join(str(x) for x in self.indices) + '))')
 
     def pp(self):
-        return self.collection.pp() + '[' + self.indices.pp() + ']'
+        return (self.collection.pp() + '['
+                + ', '.join(x.pp() for x in self.indices)
+                + ']')
 
 
 class Negation(Rentity):
     entrails = ['expression']
+    previous = wrap_previous(lambda s: s.expression)
 
     def __init__(self, ast):
         Rentity.__init__(self, ast)
@@ -546,8 +551,6 @@ class BinOp(Rentity):
     def __str__(self):
         return (self.operator.capitalize() + '('
                 + ', '.join(str(x) for x in self.operands) + ')')
-        self.op1 = ast[1]
-        self.op2 = ast[3]
 
     def eval_to(self):
         a = self.operands[0].eval_to()
@@ -570,6 +573,16 @@ class BinOp(Rentity):
                 'SLASH': '/',
                 'STAR': '*',
                 'MINUS': '-',
+                'SUP': '>',
+                'INF': '<',
+                'LE': '<=',
+                'GE': '>=',
+                'NE': '!=',
+                'EQ': '==',
+                'LOG_AND': '&&',
+                'LOG_OR': '||',
+                'AMPERSAND': '&',
+                'PIPE': '|',
                 'CIRCONFLEX': '^'}[self.operator]
 
     def pp(self):

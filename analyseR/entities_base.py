@@ -427,6 +427,38 @@ class RentityMeta(type, Path):
         return type(x) is self
 
 
+def __path_str(p):
+    if len(p) == 0:
+        return ['']
+    if len(p) == 1:
+        return [p[0].pp()]
+    parent = p[0]
+    child = p[1]
+    ret = [type(parent).__name__]
+    for ent in parent.entrails:
+        e = getattr(parent, ent)
+        if e is child:
+            ret.append('.')
+            ret.append(ent)
+        elif type(e) in (list, tuple):
+            try:
+                i = e.index(child)
+                ret.append('.')
+                ret.append(ent)
+                ret.append('[')
+                ret.append(str(i))
+                ret.append(']')
+            except:
+                pass
+    ret.append('.')
+    ret.extend(path_str(p[1:]))
+    return ret
+
+
+def path_str(p):
+    return ''.join(__path_str(p))
+
+
 class Rentity(object):
     __metaclass__ = RentityMeta
     entrails = []
@@ -632,9 +664,6 @@ class AllIndices(Rentity):
         return "AllIndices"
 
 
-allindices = AllIndices(None)
-
-
 def wrap_previous(get_target):
 
     def _set(s, v):
@@ -664,7 +693,7 @@ def extract_list(ast):
         if type(a) is tuple:
             if a[0] == 'COMMA':
                 if on_comma:
-                    ret.append(allindices)
+                    ret.append(AllIndices(tuple()))
                 else:
                     on_comma = True
             #else:
