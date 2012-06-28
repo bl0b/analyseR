@@ -13,6 +13,9 @@ from entities_base import *
 import os
 
 
+Dummy = Rentity(tuple())
+
+
 class Source(Rentity):
     entrails = ['contents']
     previous = wrap_previous(lambda s: s.contents)
@@ -54,6 +57,7 @@ class Function(Renv, Rentity):
         Rentity.__init__(self, ast)
         self.ast = ast
         self.code = ast[-1]
+        self.code.previous = Dummy
         self.params = isinstance(ast[-3], Param_list) and ast[-3] or None
         #self.name = None
         lineno = RContext.current_text[-1][:ast[1][2]].count('\n') + 1
@@ -145,7 +149,7 @@ class Return(Statement):
         return 'Return(' + str(self.expression) + ')'
 
     def eval_to(self):
-        return self.expression
+        return self.expression.eval_to()
 
 
 class Param(Rentity):
@@ -157,6 +161,7 @@ class Param(Rentity):
         self.name = ast[1][1]
         if len(ast) == 4:
             self.value = ast[3]
+            self.value.previous = Dummy
         else:
             self.value = None
 
@@ -171,10 +176,14 @@ class Param(Rentity):
 class Param_list(Rentity):
     entrails = ['params']
 
+    previous = wrap_previous(lambda s: s.params and s.params[0])
+
     def __init__(self, ast):
         Rentity.__init__(self, ast)
         #print "param list", ast
         self.params = extract_list(ast[1:])
+        for p in self.params:
+            p.previous = Dummy
         #print "param list", self.params
 
     def __str__(self):
@@ -323,6 +332,8 @@ class Call(Rentity):
                           and self._eval_call(e, what) or e)
         #p = f.code.previous
         #env.previous = self.previous
+        if not isinstance(f, Function):
+            return
         if not f.params:
             names = []
             values = []
@@ -369,7 +380,7 @@ class Call(Rentity):
         return ret
 
     def eval_to(self):
-        return self.eval_call(lambda env: env.eval_to())
+        return self.eval_call(lambda env: env.eval_to()) or self.copy()
 
     def eval_call(self, what):
         f = self.callee.eval_to()
@@ -378,7 +389,7 @@ class Call(Rentity):
             for p in self.params.expressions:
                 if isinstance(p, Assign):
                     par.append(Assign((None, p.lhs.copy(), (p.assign,),
-                                       p.eval_to().copy())))
+                                       p.eval_to())))
                 else:
                     par.append(p.eval_to())
             return Call((None, self.callee.copy(), None,
@@ -562,10 +573,10 @@ class BinOp(Rentity):
             except:
                 pass
         #print "binop-eval", a, self.operator, b
-        return type(self)((None, a.copy(), (self.operator,), b.copy()))
+        return type(self)((None, a, (self.operator,), b))
 
     def op(self, a, b):
-        return type(self)((None, a.copy(), (self.operator,), b.copy()))
+        return type(self)((None, a, (self.operator,), b))
 
     def ppop(self):
         return {'COLON': ':',

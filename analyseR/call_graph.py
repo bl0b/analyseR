@@ -15,12 +15,13 @@ def find_func_parent(e):
             # return assigned name if it exists, file:line otherwise
             if type(x.parent) is Assign:
                 return x.parent.lhs.name
-            print "found function but not in assign",
+            print "FUN BUT NO ASS",
             print path_str(p[:p.index(x) + 1])
             return x.name
-    print "didn't find any function in path", path_str(p)
     ret = 'script:' + e.get_filename()
-    print "...", ret
+    if not path_str(p).startswith('Script'):
+        print "NO FUN", path_str(p)
+        print "...", ret
     return ret
 
 
@@ -49,7 +50,7 @@ def pp(x):
 def find_calls_by_name(s, start):
     clist = list(s // Call(callee=lambda x: type(x) is Name
                                             and x.name.startswith(start)
-                                            and x.eval_to() is x))
+                                            and x.eval_to() == x))
     return [(find_func_parent(c), c) for c in clist]
 
 
@@ -91,6 +92,11 @@ def process_write(w):
 def process_reads(s):
     return map(lambda (p, r): (p,) + process_read(r),
                find_calls_by_name(s, "read."))
+    #clist = list(s // Call(callee=lambda x: type(x) is Name
+    #                                        and x.name.startswith("read.")
+    #                                        and x.eval_to() is x))
+    #return clist
+    #return find_calls_by_name(s, "read.")
 
 
 def process_writes(s):

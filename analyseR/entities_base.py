@@ -175,7 +175,9 @@ u'.OptRequireMethods', u'.packages', u'.packageStartupMessage',
 u'.path.package', u'.Platform', u'.Primitive', u'.Random.seed', u'.Renviron',
 u'.rowMeans', u'.rowSums', u'.Rprofile', u'.S3PrimitiveGenerics',
 u'.signalSimpleWarning', u'.standard_regexps', u'.Traceback', u'.userHooksEnv',
-u'.__H__.cbind', u'.__H__.rbind'])
+u'.__H__.cbind', u'.__H__.rbind',
+u'read.table', u'read.csv', u'write.table', u'write.csv',
+])
 
 
 def strip_common_path(*ents):
@@ -459,14 +461,30 @@ def path_str(p):
     return ''.join(__path_str(p))
 
 
+locked_parents = False
+
+
 class Rentity(object):
     __metaclass__ = RentityMeta
     entrails = []
+
+    def __set_p(self, p):
+        if locked_parents:
+            raise Exception("Read-only parent !")
+        self.__p = p
+
+    def __get_p(self):
+        return self.__p
+
+    parent = property(__get_p, __set_p)
 
     def __new__(cls, *a, **kw):
         if kw and not a:
             return Path.__call__(cls, **kw)
         return object.__new__(cls)
+
+    def __eq__(self, a):
+        return False
 
     def __init__(self, ast):
         self.ast = ast
@@ -480,9 +498,12 @@ class Rentity(object):
         #    setattr(self, e, None)
 
     def copy(self):
-        return type(self)(map(lambda x: isinstance(x, Rentity)
-                                        and x.copy()
-                                        or x, self.ast))
+        ret = type(self)(map(lambda x: isinstance(x, Rentity)
+                                       and x.copy()
+                                       or x, self.ast))
+        ret.previous = self.previous
+        ret.parent = self.parent
+        return ret
 
     def set_parent(self, p):
         self.parent = p
@@ -545,7 +566,7 @@ class Rentity(object):
             return self.parent.get_filename()
 
     def eval_to(self):
-        return self
+        return self.copy()
 
     def reg_name(self, name, value):
         if self.parent:
@@ -741,7 +762,7 @@ class Name(Rentity):
 
     def eval_to(self):
         if self.visibility is None and self.name in R_base_names:
-            return self
+            return self.copy()
         pathass = Assign(lhs=lambda x: type(x) is Name and x == self)
         # discard None's
         defs = filter(lambda x: x is not None,
@@ -929,10 +950,13 @@ class IfElse(If):
         self.parent = ref.parent
 
     def copy(self):
-        return IfElse(self,
-                      self.condition.copy(),
-                      self.then.copy(),
-                      self.els_ and self.els_.copy())
+        ret = IfElse(self,
+                     self.condition.copy(),
+                     self.then.copy(),
+                     self.els_ and self.els_.copy())
+        ret.parent = self.parent
+        ret.previous = self.previous
+        return ret
 
 
 class Immed(Rentity):
