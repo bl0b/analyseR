@@ -205,17 +205,6 @@ class NotWanted(Exception):
 
 class Path(object):
 
-#    def __init__(self, ev=None, it=None, pr=lambda e: True, **kw):
-#        if not kw:
-#            self.x = {'e': ev, 'i': it, 'p': pr}
-#        else:
-#            check = lambda e, k, v: hasattr(e, k) and v(getattr(e, k))
-#            self.x = {'e': lambda e: e,
-#                      'i': lambda e: (e,),
-#                      'p': lambda e: reduce(lambda a, b: a and check(e, *b),
-#                                            kw.iteritems(),
-#                                            True)}
-
     def __init__(self, ev, it, pr=lambda e: True):
         self.x = {'e': ev, 'i': it, 'p': pr}
 
@@ -405,7 +394,31 @@ def call_dumper(cls, name):
         ___indent -= 2
         print >> sys.stderr, "%s=>" % (' ' * ___indent), ret
         return ret
+    _ret.__name__ = name
     return _ret
+
+
+__shield = set()
+
+
+def shield(iterable):
+    global __shield
+    __shield.update(id(x) for x in iterable)
+
+
+def shield_against_return_self(f):
+
+    def _f(self, *a, **kw):
+        ret = f(self, *a, **kw)
+        if ret is self:
+            print type(self).__name__, f.__name__, "returns self !"
+            raise Exception("{return self} not allowed !")
+        if id(ret) in __shield:
+            print type(self).__name__, f.__name__, "returns shielded entity !"
+            raise Exception("{return shielded} not allowed !")
+        return ret
+    _f.__name__ = f.__name__
+    return _f
 
 
 class RentityMeta(type, Path):
@@ -419,8 +432,10 @@ class RentityMeta(type, Path):
         RentityMeta.registry[name.lower()] = cls
         for e in cls.entrails:
             setattr(cls, e, Rentrail(cls, e))
-        #setattr(cls, 'eval_to', call_dumper(cls, "eval_to"))
-        #setattr(cls, 'resolve', call_dumper(cls, "resolve"))
+        setattr(cls, 'eval_to', call_dumper(cls, "eval_to"))
+        setattr(cls, 'resolve', call_dumper(cls, "resolve"))
+        setattr(cls, 'eval_to', shield_against_return_self(cls.eval_to))
+        setattr(cls, 'resolve', shield_against_return_self(cls.resolve))
 
     def _expr(self, x):
         return x
@@ -433,7 +448,7 @@ def __path_str(p):
     if len(p) == 0:
         return ['']
     if len(p) == 1:
-        return [p[0].pp()]
+        return [type(p[0]).__name__, '(', p[0].pp(), ')']
     parent = p[0]
     child = p[1]
     ret = [type(parent).__name__]
@@ -585,7 +600,7 @@ class Rentity(object):
             name = name.name
         if hasattr(self, "names") and name in self.names:
             #print self, "has names and has", name, self.names[name]
-            return self.names[name][-1].eval_to()
+            return self.names[name][-1].eval_to().copy()
         return None
 
     def pp(self):
@@ -660,7 +675,7 @@ class Renv(object):
     def resolve(self, name):
         #print "resolution of", name, "in", self.names
         if name in self.names:
-            return self.names[name][-1]
+            return self.names[name][-1].copy()
         return None
 
 
@@ -761,13 +776,16 @@ class Name(Rentity):
         return ret
 
     def eval_to(self):
-        if self.visibility is None and self.name in R_base_names:
+        if self.visibility is not None or self.name in R_base_names:
+            print "routine from external package or R base:: package.",
+            print self.pp()
             return self.copy()
         pathass = Assign(lhs=lambda x: type(x) is Name and x == self)
         # discard None's
         defs = filter(lambda x: x is not None,
                       (x.resolve(self)
-                       for x in self - (pathass | If // pathass)))
+                       for x in self - (pathass | If // pathass)
+                       if x))
         # retain all IfElse's and only one previous eval (possible final else).
         defs = reduce(lambda accum, d:
                       accum[0] and (type(d) is IfElse, accum[1] + [d])
@@ -781,12 +799,12 @@ class Name(Rentity):
             #return strip_common_path(*defs)
             return reduce(chain_ifelse, defs)
         if len(defs) == 0 or defs[0] is None:
-            return self
+            return self.copy()
         return defs[0]
 
     def resolve(self, n):
         if self is n:
-            return self
+            return self.copy()
         return None
 
     def __eq__(self, a):
@@ -917,9 +935,11 @@ class If(Statement):
                 if els_ is None:
                     return None
                 elif isinstance(cond, Negation):
-                    return IfElse(self, cond.expression, els_, None)
+                    return IfElse(self, cond.expression,
+                                  els_, None)
                 else:
-                    return IfElse(self, Negation(cond), els_, None)
+                    return IfElse(self, Negation(cond),
+                                  els_, None)
             return IfElse(self, cond, then, els_)
 
     def eval_to(self):
@@ -931,7 +951,8 @@ class If(Statement):
             elif self.els_:
                 return self.els_.eval_to()
         else:
-            return IfElse(self, cond, self.then.eval_to(),
+            return IfElse(self, cond,
+                          self.then.eval_to(),
                           self.els_ and self.els_.eval_to())
 
 
@@ -950,13 +971,10 @@ class IfElse(If):
         self.parent = ref.parent
 
     def copy(self):
-        ret = IfElse(self,
-                     self.condition.copy(),
-                     self.then.copy(),
-                     self.els_ and self.els_.copy())
-        ret.parent = self.parent
-        ret.previous = self.previous
-        return ret
+        return IfElse(self,
+                      self.condition.copy(),
+                      self.then.copy(),
+                      self.els_ and self.els_.copy())
 
 
 class Immed(Rentity):

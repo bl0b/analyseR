@@ -112,7 +112,7 @@ def process_call(c):
             return (e.name.name,)
         elif isinstance(e, IfElse):
             return extract_fnames(e.then) + extract_fnames(e.els_)
-        return tuple()
+        return e
 
     return (find_func_parent(c),
             c.callee,

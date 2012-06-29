@@ -20,11 +20,19 @@ class Source(Rentity):
     entrails = ['contents']
     previous = wrap_previous(lambda s: s.contents)
 
-    def __init__(self, ast):
+    def __init__(self, ast, parse=True):
         Rentity.__init__(self, ast)
-        self.filename = os.path.join(RContext.current_dir[-1], ast[3][1][1:-1])
-        #print "Sourcing", self.filename
-        self.contents = RContext.parse(self.filename)
+        if parse:
+            self.filename = os.path.join(RContext.current_dir[-1],
+                                         ast[3][1][1:-1])
+            #print "Sourcing", self.filename
+            self.contents = RContext.parse(self.filename)
+
+    def copy(self):
+        ret = Source(self.ast, False)
+        ret.filename = str(self.filename)
+        ret.contents = self.contents.copy()
+        ret.previous = self.previous
 
     def __str__(self):
         return 'Source(' + self.filename + ')'
@@ -71,23 +79,6 @@ class Function(Renv, Rentity):
                 + '(' + str(self.params) + ') '
                 + str(self.code))
 
-    #def make_name(self, name):
-    #    ret = Function(self.ast)
-    #    ret.name = name
-    #    return ret
-
-    #def eval_to(self):
-    #    return self.code.eval_to()
-
-
-#_prev_get = lambda s: len(s.statements) and s.statements[0].previous or None
-#
-#
-#def _prev_set(s, v):
-#    if s.statements is None or not len(s.statements):
-#        return
-#    s.statements[0].previous = v
-
 
 class Statements(Statement):
     entrails = ['statements']
@@ -97,16 +88,18 @@ class Statements(Statement):
 
     def __init__(self, statements):
         Statement.__init__(self, statements)
-        self.statements = statements
-        for i in xrange(1, len(statements)):
-                statements[i].previous = statements[i - 1]
+        self.statements = statements[1:]
+        for i in xrange(1, len(self.statements)):
+                self.statements[i].previous = self.statements[i - 1]
 
     def __str__(self):
         return (type(self).__name__ + '('
                 + str(len(self.statements)) + ' statements)')
 
     def eval_to(self):
-        return self.statements[-1].eval_to()
+        return reduce(lambda a, b: a or b.eval_to(),
+                      reversed(self.statements),
+                      None)
 
     def resolve(self, n):
         for s in reversed(self.statements):
@@ -247,7 +240,7 @@ class CallContext(Renv, Rentity):
     def resolve(self, name):
         #print "resolution of", name, "in (call context)", self.names
         if name.name in self.names:
-            return self.names[name.name][-1]
+            return self.names[name.name][-1].copy()
         return None
 
 
@@ -403,7 +396,7 @@ class Script(Renv, Statements):
 
     def __init__(self, ast):
         Renv.__init__(self)
-        Statements.__init__(self, ast[1:])
+        Statements.__init__(self, ast)
 
 
 class For(Statement):
@@ -550,14 +543,18 @@ class BinOp(Rentity):
     #previous = property(_binop_prev_get, _binop_prev_set)
 
     def __init__(self, ast):
-        Rentity.__init__(self, ast)
-        self.operator = ast[2][0]
-        self.operands = ast[1::2]
-        if type(self.operands[1]) is tuple:
-            print "BinOp"
-            print "   operator", self.operator
-            print "   operands", self.operands[0], self.operands[1]
-        self.operands[1].previous = self.operands[0]
+        try:
+            Rentity.__init__(self, ast)
+            self.operator = ast[2][0]
+            self.operands = ast[1::2]
+            if type(self.operands[1]) is tuple:
+                print "BinOp"
+                print "   operator", self.operator
+                print "   operands", self.operands[0], self.operands[1]
+            self.operands[1].previous = self.operands[0]
+        except Exception, e:
+            print "BinOp error", ast
+            raise e
 
     def __str__(self):
         return (self.operator.capitalize() + '('
@@ -569,7 +566,10 @@ class BinOp(Rentity):
         if type(a) is Immed and type(b) is Immed:
             try:
                 result = self.op(a.value(), b.value())
-                return Immed((None, (a.typ, result)))
+                ret = Immed((None, (a.typ, result)))
+                ret.previous = self.previous
+                ret.parent = self.parent
+                return ret
             except:
                 pass
         #print "binop-eval", a, self.operator, b
@@ -655,7 +655,10 @@ class Exponentiation(BinOp):
 class Slot_extraction(BinOp):
 
     def __init__(self, ast):
-        BinOp.__init__(self, ast[:-1] + (Name(ast[-2:]),))
+        if type(ast[-1]) is Name:
+            BinOp.__init__(self, ast)
+        else:
+            BinOp.__init__(self, ast[:-1] + (Name(ast[-2:]),))
         #self.operands[1] = Name((None, (None, self.operands[1])))
 
     @property

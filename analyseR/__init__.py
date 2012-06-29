@@ -5,8 +5,9 @@ from call_graph import *
 
 def __check(e, r):
     if e.parent is not r:
-        print "BAD PARENT", e.parent, "EXPECTED",
-        print r, "IN", path_str(e.get_path())
+        print "BAD PARENT", path_str(e.parent.get_path())
+        print "  EXPECTED", path_str(r.get_path())
+        print "        IN", path_str(e.get_path())
     if e.previous is None:
         pstr = path_str(e.get_path())
         #if not ('Function.params' in pstr
