@@ -1,11 +1,12 @@
 __all__ = ['io_graph', 'process_reads', 'process_writes', 'process_calls',
-           'io_nodes', 'call_nodes', 'all_nodes']
+           'io_nodes', 'call_nodes', 'all_nodes', 'io_and_call_graph']
 
 from parseR import parse
 from entities import *
 from itertools import *
 import sys
 import os
+import pygraphviz as pgv
 
 
 def find_func_parent(e):
@@ -23,6 +24,10 @@ def find_func_parent(e):
         print "NO FUN", path_str(p)
         print "...", ret
     return ret
+
+
+def clean_str(s):
+    return s[s[0] == '"' and 1 or 0:s[-1] == '"' and -1 or len(s)]
 
 
 def pp(x):
@@ -92,11 +97,6 @@ def process_write(w):
 def process_reads(s):
     return map(lambda (p, r): (p,) + process_read(r),
                find_calls_by_name(s, "read."))
-    #clist = list(s // Call(callee=lambda x: type(x) is Name
-    #                                        and x.name.startswith("read.")
-    #                                        and x.eval_to() is x))
-    #return clist
-    #return find_calls_by_name(s, "read.")
 
 
 def process_writes(s):
@@ -112,7 +112,7 @@ def process_call(c):
             return (e.name.name,)
         elif isinstance(e, IfElse):
             return extract_fnames(e.then) + extract_fnames(e.els_)
-        return e
+        return tuple()
 
     return (find_func_parent(c),
             c.callee,
@@ -148,11 +148,54 @@ def all_nodes(s):
     return ret
 
 
+def io_and_call_graph(n):
+    g = pgv.AGraph(directed=True)
+    #reduce(lambda a, b: g.add_node(b, label=b, shape="rectangle"),
+    #       n['nr'] | n['nw'] | n['nc'],
+    #       None)
+    all_files = map(clean_str,
+                    set(str(f) for w, h, f in n['reads'])
+                    | set(str(f) for w, h, wa, f in n['writes']))
+    dirnames = map(os.path.dirname, all_files)
+    clusters = {}
+    for dn in dirnames:
+        clusters[dn] = []
+    for d, a in zip(dirnames, all_files):
+        g.add_node(a, label=os.path.basename(a), shape="ellipse")
+        clusters[d].append(a)
+
+    i = 0
+    for d in clusters:
+        if not d:
+            continue
+        i += 1
+        g.subgraph(clusters[d], name='cluster' + str(i),
+                                style="filled",
+                                color="lightgrey",
+                                label=d)
+
+    for whence, how, from_ in n['reads']:
+        g.add_node(str(whence), label=str(whence), shape="rectangle")
+        #g.add_node(str(from_), label=str(from_), shape="ellipse")
+        g.add_edge(str(from_), str(whence), color='red', arrowhead="odot")
+    for whence, how, what, into in n['writes']:
+        g.add_node(str(whence), label=str(whence), shape="rectangle")
+        #g.add_node(str(into), label=str(into), shape="ellipse")
+        g.add_edge(str(whence), str(into),
+                   label=str(how) + '(' + str(what) + ')',
+                   color='green', arrowhead="odot")
+    for caller, callee, filenames in n['here_calls']:
+        callee = callee.name
+        g.add_node(str(caller), label=str(caller), shape="rectangle")
+        g.add_node(str(callee), label=str(callee), shape="rectangle")
+        g.add_edge(str(caller), str(callee))
+    return g
+
+
 def io_graph(s):
     reads = process_reads(s)
     writes = process_writes(s)
 
-    import pygraphviz as pgv
     g = pgv.AGraph(directed=True)
     for whence, how, from_ in reads:
         g.add_node(str(whence), label=str(whence), shape="rectangle")

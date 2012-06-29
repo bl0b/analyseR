@@ -432,10 +432,10 @@ class RentityMeta(type, Path):
         RentityMeta.registry[name.lower()] = cls
         for e in cls.entrails:
             setattr(cls, e, Rentrail(cls, e))
-        setattr(cls, 'eval_to', call_dumper(cls, "eval_to"))
-        setattr(cls, 'resolve', call_dumper(cls, "resolve"))
-        setattr(cls, 'eval_to', shield_against_return_self(cls.eval_to))
-        setattr(cls, 'resolve', shield_against_return_self(cls.resolve))
+        #setattr(cls, 'eval_to', call_dumper(cls, "eval_to"))
+        #setattr(cls, 'resolve', call_dumper(cls, "resolve"))
+        #setattr(cls, 'eval_to', shield_against_return_self(cls.eval_to))
+        #setattr(cls, 'resolve', shield_against_return_self(cls.resolve))
 
     def _expr(self, x):
         return x
@@ -777,8 +777,8 @@ class Name(Rentity):
 
     def eval_to(self):
         if self.visibility is not None or self.name in R_base_names:
-            print "routine from external package or R base:: package.",
-            print self.pp()
+            #print "routine from external package or R base:: package.",
+            #print self.pp()
             return self.copy()
         pathass = Assign(lhs=lambda x: type(x) is Name and x == self)
         # discard None's
@@ -867,7 +867,7 @@ class Assign(Statement):
 
     def resolve(self, name):
         if self.lhs == name:
-            return self.rhs
+            return self.rhs.copy()
         return None
 
     def ppop(self):
