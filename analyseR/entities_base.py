@@ -421,6 +421,28 @@ def shield_against_return_self(f):
     return _f
 
 
+def cached_eval_to(f):
+
+    def _cet(self):
+        if self._eval_cache is None:
+            self._eval_cache = f(self)
+        return self._eval_cache
+    _cet.__name__ = f.__name__
+    return _cet
+    #return f
+
+
+def cached_resolve(f):
+
+    def _cr(self, n):
+        if n not in self._resolv_cache:
+            self._resolv_cache[n] = f(self, n)
+        return self._resolv_cache[n]
+    _cr.__name__ = f.__name__
+    return _cr
+    #return f
+
+
 class RentityMeta(type, Path):
     registry = {}
 
@@ -509,6 +531,8 @@ class Rentity(object):
         self.filename = RContext.current_file[-1]
         self.parent = None
         self.previous = None
+        self._resolv_cache = {}
+        self._eval_cache = None
         #for e in self.entrails:
         #    setattr(self, e, None)
 
@@ -518,6 +542,8 @@ class Rentity(object):
                                        or x, self.ast))
         ret.previous = self.previous
         ret.parent = self.parent
+        ret._eval_cache = self._eval_cache
+        ret._resolv_cache = self._resolv_cache.copy()
         return ret
 
     def set_parent(self, p):
@@ -593,6 +619,7 @@ class Rentity(object):
         else:
             return [self]
 
+    @cached_resolve
     def resolve(self, name):
         if type(name) is Name:
             if name.visibility is not None:
@@ -600,7 +627,7 @@ class Rentity(object):
             name = name.name
         if hasattr(self, "names") and name in self.names:
             #print self, "has names and has", name, self.names[name]
-            return self.names[name][-1].eval_to().copy()
+            return self.names[name][-1].copy()
         return None
 
     def pp(self):
@@ -664,19 +691,18 @@ class RProxyTuple(tuple, RProxy):
 class Renv(object):
 
     def __init__(self):
-        self.names = {}
+        self.names = {Name('FALSE'): [Immed(0)],
+                      Name('TRUE'): [Immed(1)],
+                      Name('T'): [Immed(1)],
+                      Name('F'): [Immed(0)]}
 
     def reg_name(self, name, value):
         if name in self.names:
+            if type(value) is list:
+                raise Exception(str(value))
             self.names[name].append(value)
         else:
             self.names[name] = [value]
-
-    def resolve(self, name):
-        #print "resolution of", name, "in", self.names
-        if name in self.names:
-            return self.names[name][-1].copy()
-        return None
 
 
 class RContext(object):
@@ -775,6 +801,7 @@ class Name(Rentity):
         ret += ')'
         return ret
 
+    @cached_eval_to
     def eval_to(self):
         if self.visibility is not None or self.name in R_base_names:
             #print "routine from external package or R base:: package.",
@@ -802,6 +829,7 @@ class Name(Rentity):
             return self.copy()
         return defs[0]
 
+    @cached_resolve
     def resolve(self, n):
         if self is n:
             return self.copy()
@@ -858,13 +886,15 @@ class Assign(Statement):
     def __str__(self):
         return 'Assign(lhs=' + str(self.lhs) + ', rhs=' + str(self.rhs) + ')'
 
+    @cached_eval_to
     def eval_to(self):
         return self.rhs.eval_to()
 
     def set_parent(self, p):
         Statement.set_parent(self, p)
-        self.reg_name(self.lhs, self.rhs)
+        self.reg_name(self.lhs, self.rhs.eval_to())
 
+    @cached_resolve
     def resolve(self, name):
         if self.lhs == name:
             return self.rhs.copy()
@@ -879,6 +909,33 @@ class Assign(Statement):
 
     def pp(self):
         return self.lhs.pp() + ' ' + self.ppop() + ' ' + self.rhs.pp()
+
+
+class Negation(Rentity):
+    entrails = ['expression']
+    previous = wrap_previous(lambda s: s.expression)
+
+    def __new__(cls, ast):
+        if isinstance(ast[2], Negation):
+            return ast[2].expression
+        return Rentity.__new__(cls, ast)
+
+    def __init__(self, ast):
+        Rentity.__init__(self, ast)
+        self.expression = ast[2]
+
+    def __str__(self):
+        return 'Not(' + str(self.expression) + ')'
+
+    @cached_eval_to
+    def eval_to(self):
+        x = self.expression.eval_to()
+        if isinstance(x, Immed) and x.typ == 'NUM':
+            return Immed(not x.value())
+        return Negation((None, None, x.copy()))
+
+    def pp(self):
+        return '!(' + self.expression.pp() + ')'
 
 
 class If(Statement):
@@ -920,6 +977,7 @@ class If(Statement):
         ret += ')'
         return ret
 
+    @cached_resolve
     def resolve(self, n):
         cond = self.condition.eval_to()
         #print "[resolve] If eval cond to", cond
@@ -934,14 +992,11 @@ class If(Statement):
             if then is None:
                 if els_ is None:
                     return None
-                elif isinstance(cond, Negation):
-                    return IfElse(self, cond.expression,
-                                  els_, None)
-                else:
-                    return IfElse(self, Negation(cond),
-                                  els_, None)
+                return IfElse(self, Negation((None, None, cond)),
+                              els_, None)
             return IfElse(self, cond, then, els_)
 
+    @cached_eval_to
     def eval_to(self):
         cond = self.condition.eval_to()
         #print "[eval_to] If eval cond to", cond
@@ -986,9 +1041,11 @@ class Immed(Rentity):
                 or isinstance(ast, long)):
             self.typ = 'NUM'
             self.val = str(ast)
+            self.ast = (None, (self.typ, self.val,))
         elif isinstance(ast, str):
             self.typ = 'STRING'
             self.val = ast
+            self.ast = (None, (self.typ, self.val,))
         else:
             self.typ = ast[1][0]
             self.val = ast[1][1]

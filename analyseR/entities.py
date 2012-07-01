@@ -51,10 +51,10 @@ class Source(Rentity):
         return ('Sourced_Script('
                 + str(len(self.contents.statements)) + ' statements)')
 
-    def set_parent(self, par):
-        Rentity.set_parent(self, par)
-        for name, value in self.names.iteritems():
-            par.reg_name(name, value)
+    #def set_parent(self, par):
+    #    Rentity.set_parent(self, par)
+    #    for name, value in self.names.iteritems():
+    #        par.reg_name(name, value)
 
 
 class Function(Renv, Rentity):
@@ -80,32 +80,55 @@ class Function(Renv, Rentity):
                 + str(self.code))
 
 
-class Statements(Statement):
+class Statements(Renv, Statement):
     entrails = ['statements']
 
     #previous = property(_prev_get, _prev_set)
     previous = wrap_previous(lambda s: s.statements and s.statements[0])
 
     def __init__(self, statements):
+        Renv.__init__(self)
         Statement.__init__(self, statements)
         self.statements = statements[1:]
         for i in xrange(1, len(self.statements)):
                 self.statements[i].previous = self.statements[i - 1]
+        returns = filter(lambda x: type(x) is Return, self.statements)
+        self.has_return = returns and returns[0] or None
+
+    @cached_eval_to
+    def eval_to(self):
+        if self.has_return:
+            return self.has_return.eval_to()
+        for s in reversed(self.statements):
+            ret = s.eval_to()
+            if ret is not None:
+                return ret
+        return None
 
     def __str__(self):
         return (type(self).__name__ + '('
                 + str(len(self.statements)) + ' statements)')
 
-    def eval_to(self):
-        return reduce(lambda a, b: a or b.eval_to(),
-                      reversed(self.statements),
-                      None)
+    #def eval_to(self):
+    #    return reduce(lambda a, b: a or b.eval_to(),
+    #                  reversed(self.statements),
+    #                  None)
 
+    #def resolve(self, n):
+    #    for s in reversed(self.statements):
+    #        r = s.resolve(n)
+    #        if r is not None:
+    #            return r
+    #    return None
     def resolve(self, n):
-        for s in reversed(self.statements):
-            r = s.resolve(n)
-            if r is not None:
-                return r
+        if n in self.names:
+            try:
+                return self.names[n][-1].copy()
+            except Exception, e:
+                print self
+                print n
+                print self.names[n]
+                raise e
         return None
 
     def __getitem__(self, i):
@@ -115,18 +138,8 @@ class Statements(Statement):
 class Bloc(Statements):
 
     def __init__(self, ast):
-        Statements.__init__(self, ast[2:-1])
-        returns = filter(lambda x: type(x) is Return, self.statements)
-        self.has_return = returns and returns[0] or None
-
-    def eval_to(self):
-        if self.has_return:
-            return self.has_return.eval_to()
-        for s in reversed(self.statements):
-            ret = s.eval_to()
-            if ret is not None:
-                return ret
-        return None
+        Statements.__init__(self, ast[1:-1])
+        self.ast = ast
 
 
 class Return(Statement):
@@ -231,19 +244,6 @@ class Toplevel_expression(Statement):
         return self.expression.eval_to()
 
 
-class CallContext(Renv, Rentity):
-
-    def __init__(self):
-        Renv.__init__(self)
-        Rentity.__init__(self, ast)
-
-    def resolve(self, name):
-        #print "resolution of", name, "in (call context)", self.names
-        if name.name in self.names:
-            return self.names[name.name][-1].copy()
-        return None
-
-
 class Call(Rentity):
     entrails = ['callee', 'params']
     previous = wrap_previous(lambda s: s.callee)
@@ -265,52 +265,6 @@ class Call(Rentity):
         else:
             return self.callee.pp() + '()'
 
-#    def _eval_call(self, f):
-#        #print "EVAL CALL", f
-#        if isinstance(f, IfElse):
-#            t = f.then and f.then.eval_to()
-#            e = f.els_ and f.els_.eval_to()
-#            #print "t", t
-#            #print "e", e
-#            return IfElse(f, f.condition,
-#                          (isinstance(t, Function) or isinstance(t, IfElse))
-#                          and self._eval_call(t) or t,
-#                          (isinstance(e, Function) or isinstance(e, IfElse))
-#                          and self._eval_call(e) or e)
-#        #p = f.code.previous
-#        env = CallContext()
-#        #env.previous = self.previous
-#        names = [p.name for p in f.params.params]
-#        values = [[p.value] for p in f.params.params]
-#        for j, par in enumerate(self.params.expressions):
-#            # FIXME : make some kind of NamedArgument to avoid
-#            # conflicts when exporting the assigned name.
-#            if isinstance(par, Assign):
-#                if par.assign == 'EQUAL':
-#                    i = names.index(par.lhs.name)
-#                else:
-#                    i = j
-#                value = par.rhs.eval_to()
-#            else:
-#                i = j
-#                value = par.eval_to()
-#            values[i] = [value]
-#        env.names.update(izip(names, values))
-#        #print "Call context :"
-#        #for n, v in env.names.iteritems():
-#        #    print "    ", n, v
-#        backup = f.code.previous
-#        env.previous = (RContext.call_resolution
-#                        and RContext.call_resolution[-1]
-#                        or None)
-#        f.code.previous = env
-#        ##f.code.previous = env
-#        RContext.call_resolution.append(env)
-#        ret = f.code.eval_to()
-#        RContext.call_resolution.pop()
-#        f.code.previous = backup
-#        return ret
-
     def _eval_call(self, f, what):
         #print "EVAL CALL", f
         if isinstance(f, IfElse):
@@ -323,8 +277,6 @@ class Call(Rentity):
                           and self._eval_call(t, what) or t,
                           (isinstance(e, Function) or isinstance(e, IfElse))
                           and self._eval_call(e, what) or e)
-        #p = f.code.previous
-        #env.previous = self.previous
         if not isinstance(f, Function):
             return
         if not f.params:
@@ -346,43 +298,36 @@ class Call(Rentity):
                     i = j
                     value = par.eval_to()
                 values[i] = value
-        #env.names.update(izip(names, values))
-        #print names
-        #print values
-        code = type(f.code) is Bloc and f.code or [f.code]
-        env = Statements([Assign((None, Name((None, (None, n))),
-                                 ('LEFT_ARROW',),
-                                 v.copy()))
-                          for n, v in izip(names, values)]
-                          + code)
-        #print env.statements
-        #print "Call context :"
-        #for n, v in env.names.iteritems():
-        #    print "    ", n, v
-        #backup = f.code.previous
-        #env.previous = (RContext.call_resolution
-        #                and RContext.call_resolution[-1]
-        #                or None)
+        code = f.code.copy()
+        #print "Called code",
+        #print isinstance(f.code, Statements) and f.code.statements or f.code
+        env = Statements([None]
+                         + [Assign((None, Name((None, (None, n))),
+                                   ('LEFT_ARROW',),
+                                   v.copy()))
+                            for n, v in izip(names, values)]
+                         + (isinstance(code, Statements)
+                            and code.statements
+                             or [code]))
         env.previous = self.previous
-       #f.code.previous = env.statements and env.statements[-1] or env.previous
         RContext.call_resolution.append(env)
-        #print str(env.statements)
+        #print "Call frame", env.statements
         ret = what(env)
         RContext.call_resolution.pop()
-        #f.code.previous = backup
         return ret
 
+    @cached_eval_to
     def eval_to(self):
         return self.eval_call(lambda env: env.eval_to()) or self.copy()
 
     def eval_call(self, what):
         f = self.callee.eval_to()
-        if f is self.callee:
+        if f in (self.callee, None):
             par = []
             for p in self.params.expressions:
                 if isinstance(p, Assign):
                     par.append(Assign((None, p.lhs.copy(), (p.assign,),
-                                       p.eval_to())))
+                                       p.rhs.eval_to())))
                 else:
                     par.append(p.eval_to())
             return Call((None, self.callee.copy(), None,
@@ -390,12 +335,11 @@ class Call(Rentity):
         return self._eval_call(f, what)
 
 
-class Script(Renv, Statements):
+class Script(Statements):
 
     previous = Statements.previous
 
     def __init__(self, ast):
-        Renv.__init__(self)
         Statements.__init__(self, ast)
 
 
@@ -471,6 +415,7 @@ class Unary_plus_or_minus(Rentity):
     def __str__(self):
         return 'Minus(' + str(self.expression) + ')'
 
+    @cached_eval_to
     def eval_to(self):
         x = self.expression.eval_to()
         if isinstance(x, Immed) and x.typ == 'NUM':
@@ -501,32 +446,6 @@ class Indexing(Rentity):
         return (self.collection.pp() + '['
                 + ', '.join(x.pp() for x in self.indices)
                 + ']')
-
-
-class Negation(Rentity):
-    entrails = ['expression']
-    previous = wrap_previous(lambda s: s.expression)
-
-    def __init__(self, ast):
-        Rentity.__init__(self, ast)
-        self.expression = ast[2]
-
-    def __str__(self):
-        return 'Not(' + str(self.expression) + ')'
-
-    def eval_to(self):
-        x = self.expression.eval_to()
-        if isinstance(x, Name) and x.visibility is None:
-            if x.name in ('T', 'TRUE'):
-                return Immed((None, ('NUM', '0')))
-            elif x.name in ('F', 'FALSE'):
-                return Immed((None, ('NUM', '1')))
-        if isinstance(x, Immed) and x.typ == 'NUM':
-            return Immed((None, ('NUM', x.value() and '0' or '1')))
-        return Negation((None, None, x.copy()))
-
-    def pp(self):
-        return '!(' + self.expression.pp() + ')'
 
 
 _binop_prev_get = lambda s: s.operands[0].previous
@@ -560,13 +479,16 @@ class BinOp(Rentity):
         return (self.operator.capitalize() + '('
                 + ', '.join(str(x) for x in self.operands) + ')')
 
+    @cached_eval_to
     def eval_to(self):
         a = self.operands[0].eval_to()
         b = self.operands[1].eval_to()
         if type(a) is Immed and type(b) is Immed:
             try:
                 result = self.op(a.value(), b.value())
-                ret = Immed((None, (a.typ, result)))
+                typ = type(result) is str and 'STRING' or 'NUM'
+                result = type(result) is str and result or int(result)
+                ret = Immed((None, (typ, result)))
                 ret.previous = self.previous
                 ret.parent = self.parent
                 return ret
@@ -631,15 +553,26 @@ class Muldiv(BinOp):
 
 
 class Comparison(BinOp):
-    pass
+
+    def op(self, a, b):
+        return {'EQ': lambda a, b: a == b,
+                'NE': lambda a, b: a != b,
+                'LE': lambda a, b: a <= b,
+                'GE': lambda a, b: a >= b,
+                'INF': lambda a, b: a < b,
+                'SUP': lambda a, b: a > b}[self.operator](a, b)
 
 
 class Bool_and(BinOp):
-    pass
+
+    def op(self, a, b):
+        return (a and b) and 1 or 0
 
 
 class Bool_or(BinOp):
-    pass
+
+    def op(self, a, b):
+        return (a or b) and 1 or 0
 
 
 class Formula(BinOp):
