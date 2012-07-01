@@ -33,6 +33,7 @@ class Source(Rentity):
         ret.filename = str(self.filename)
         ret.contents = self.contents.copy()
         ret.previous = self.previous
+        return ret
 
     def __str__(self):
         return 'Source(' + self.filename + ')'
@@ -69,9 +70,7 @@ class Function(Renv, Rentity):
         self.params = isinstance(ast[-3], Param_list) and ast[-3] or None
         #self.name = None
         lineno = RContext.current_text[-1][:ast[1][2]].count('\n') + 1
-        self.name = Name((tuple(),
-                          ('', RContext.current_file[-1]
-                               + ':' + str(lineno))))
+        self.name = Name(RContext.current_file[-1] + ':' + str(lineno))
 
     def __str__(self):
         return ('Function'
@@ -123,7 +122,7 @@ class Statements(Renv, Statement):
     def resolve(self, n):
         if n in self.names:
             try:
-                return self.names[n][-1].copy()
+                return self.names[n][-1]
             except Exception, e:
                 print self
                 print n
@@ -272,11 +271,13 @@ class Call(Rentity):
             e = f.els_ and f.els_.eval_to()
             #print "t", t
             #print "e", e
-            return IfElse(f, f.condition,
-                          (isinstance(t, Function) or isinstance(t, IfElse))
-                          and self._eval_call(t, what) or t,
-                          (isinstance(e, Function) or isinstance(e, IfElse))
-                          and self._eval_call(e, what) or e)
+            t = ((isinstance(t, Function) or isinstance(t, IfElse))
+                 and self._eval_call(t, what) or t)
+            e = ((isinstance(e, Function) or isinstance(e, IfElse))
+                 and self._eval_call(e, what) or e)
+            t = t and t.copy()
+            e = e and e.copy()
+            return IfElse(f, f.condition, t, e)
         if not isinstance(f, Function):
             return
         if not f.params:
@@ -298,17 +299,17 @@ class Call(Rentity):
                     i = j
                     value = par.eval_to()
                 values[i] = value
-        code = f.code.copy()
+        code = [x.copy() for x in (isinstance(f.code, Statements)
+                                   and f.code
+                                   or (f.code,))]
         #print "Called code",
         #print isinstance(f.code, Statements) and f.code.statements or f.code
         env = Statements([None]
-                         + [Assign((None, Name((None, (None, n))),
+                         + [Assign((None, Name(n),
                                    ('LEFT_ARROW',),
                                    v.copy()))
                             for n, v in izip(names, values)]
-                         + (isinstance(code, Statements)
-                            and code.statements
-                             or [code]))
+                         + code)
         env.previous = self.previous
         RContext.call_resolution.append(env)
         #print "Call frame", env.statements
@@ -318,7 +319,7 @@ class Call(Rentity):
 
     @cached_eval_to
     def eval_to(self):
-        return self.eval_call(lambda env: env.eval_to()) or self.copy()
+        return self.eval_call(lambda env: env.eval_to()) or self
 
     def eval_call(self, what):
         f = self.callee.eval_to()
@@ -327,9 +328,9 @@ class Call(Rentity):
             for p in self.params.expressions:
                 if isinstance(p, Assign):
                     par.append(Assign((None, p.lhs.copy(), (p.assign,),
-                                       p.rhs.eval_to())))
+                                       p.rhs.eval_to().copy())))
                 else:
-                    par.append(p.eval_to())
+                    par.append(p.eval_to().copy())
             return Call((None, self.callee.copy(), None,
                          Expression_list([None] + par)))
         return self._eval_call(f, what)
@@ -465,7 +466,7 @@ class BinOp(Rentity):
         try:
             Rentity.__init__(self, ast)
             self.operator = ast[2][0]
-            self.operands = ast[1::2]
+            self.operands = map(lambda x: x.copy(), ast[1::2])
             if type(self.operands[1]) is tuple:
                 print "BinOp"
                 print "   operator", self.operator
@@ -486,19 +487,16 @@ class BinOp(Rentity):
         if type(a) is Immed and type(b) is Immed:
             try:
                 result = self.op(a.value(), b.value())
-                typ = type(result) is str and 'STRING' or 'NUM'
-                result = type(result) is str and result or int(result)
-                ret = Immed((None, (typ, result)))
+                ret = Immed(result)
                 ret.previous = self.previous
-                ret.parent = self.parent
                 return ret
             except:
                 pass
         #print "binop-eval", a, self.operator, b
-        return type(self)((None, a, (self.operator,), b))
+        return type(self)((None, a.copy(), (self.operator,), b.copy()))
 
     def op(self, a, b):
-        return type(self)((None, a, (self.operator,), b))
+        return type(self)((None, Immed(a), (self.operator,), Immed(b)))
 
     def ppop(self):
         return {'COLON': ':',
@@ -516,7 +514,8 @@ class BinOp(Rentity):
                 'LOG_OR': '||',
                 'AMPERSAND': '&',
                 'PIPE': '|',
-                'CIRCONFLEX': '^'}[self.operator]
+                'CIRCONFLEX': '^',
+                'DOLLAR': '$'}[self.operator]
 
     def pp(self):
         return ('(' + self.operands[0].pp()
@@ -525,9 +524,7 @@ class BinOp(Rentity):
 
 
 class Sequence(BinOp):
-
-    def op(self, a, b):
-        return Sequence((None, ('NUM', a), ('COLON',), ('NUM', b)))
+    pass
 
 
 class Addsub(BinOp):
@@ -560,7 +557,7 @@ class Comparison(BinOp):
                 'LE': lambda a, b: a <= b,
                 'GE': lambda a, b: a >= b,
                 'INF': lambda a, b: a < b,
-                'SUP': lambda a, b: a > b}[self.operator](a, b)
+                'SUP': lambda a, b: a > b}[self.operator](a, b) and 1 or 0
 
 
 class Bool_and(BinOp):

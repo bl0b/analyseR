@@ -1,5 +1,6 @@
 import os
 import sys
+from itertools import *
 
 
 R_base_names = set([u'base-package', u'abbreviate', u'abs', u'acos', u'acosh',
@@ -426,7 +427,7 @@ def cached_eval_to(f):
     def _cet(self):
         if self._eval_cache is None:
             self._eval_cache = f(self)
-        return self._eval_cache
+        return self._eval_cache or self
     _cet.__name__ = f.__name__
     return _cet
     #return f
@@ -435,7 +436,7 @@ def cached_eval_to(f):
 def cached_resolve(f):
 
     def _cr(self, n):
-        if n not in self._resolv_cache:
+        if n not in self._resolv_cache or not self._resolv_cache[n]:
             self._resolv_cache[n] = f(self, n)
         return self._resolv_cache[n]
     _cr.__name__ = f.__name__
@@ -506,8 +507,10 @@ class Rentity(object):
     entrails = []
 
     def __set_p(self, p):
-        if locked_parents:
-            raise Exception("Read-only parent !")
+        if self.__p is not None:
+            raise Exception("Read-only parent !"
+                            + "\nEntity: " + str(self)
+                            + "\nPath: " + path_str(self.get_path()))
         self.__p = p
 
     def __get_p(self):
@@ -525,11 +528,11 @@ class Rentity(object):
 
     def __init__(self, ast):
         self.ast = ast
+        self.__p = None
         for e in self.entrails:
             setattr(self, '_' + e, None)
             #getattr(self, e).owner = self
         self.filename = RContext.current_file[-1]
-        self.parent = None
         self.previous = None
         self._resolv_cache = {}
         self._eval_cache = None
@@ -541,9 +544,10 @@ class Rentity(object):
                                        and x.copy()
                                        or x, self.ast))
         ret.previous = self.previous
-        ret.parent = self.parent
         ret._eval_cache = self._eval_cache
-        ret._resolv_cache = self._resolv_cache.copy()
+        ret._resolv_cache = {}
+        for k, v in self._resolv_cache.iteritems():
+            ret._resolv_cache[k] = isinstance(v, Rentity) and v.copy() or v
         return ret
 
     def set_parent(self, p):
@@ -607,7 +611,7 @@ class Rentity(object):
             return self.parent.get_filename()
 
     def eval_to(self):
-        return self.copy()
+        return self
 
     def reg_name(self, name, value):
         if self.parent:
@@ -627,7 +631,7 @@ class Rentity(object):
             name = name.name
         if hasattr(self, "names") and name in self.names:
             #print self, "has names and has", name, self.names[name]
-            return self.names[name][-1].copy()
+            return self.names[name][-1]
         return None
 
     def pp(self):
@@ -640,25 +644,6 @@ class Rentity(object):
                 yield e
             for k in e:
                 yield k
-
-#    def __div__(self, what):
-#        return [x
-#                for c in self.children(lambda x: True)
-#                for x in what.search(c)]
-
-#    def __floordiv__(self, what):
-#        return [x for c in self.deep(lambda x: True) for x in what.search(c)]
-
-#    def __sub__(self, what):
-#        return [x
-#                for c in self.before(lambda x: True)
-#                for x in what.search(c)]
-
-#    def __mul__(self, what):
-#        return self.parent and [x for x in what.search(self.parent)] or []
-
-#    def __pow__(self, what):
-#        return [x for p in self.above(lambda x: True) for x in what.search(p)]
 
 
 Any = Path(lambda e: e, lambda e: (e,), lambda e: True)
@@ -771,7 +756,7 @@ def chain_ifelse(ifelse, smthg):
     while type(ifelse) is IfElse and ifelse.els_:
         ifelse = ifelse.els_
     if type(ifelse) is IfElse:
-        ifelse.els_ = smthg
+        ifelse.els_ = smthg.copy()
     return ret
 
 
@@ -806,13 +791,17 @@ class Name(Rentity):
         if self.visibility is not None or self.name in R_base_names:
             #print "routine from external package or R base:: package.",
             #print self.pp()
-            return self.copy()
+            return self
         pathass = Assign(lhs=lambda x: type(x) is Name and x == self)
         # discard None's
-        defs = filter(lambda x: x is not None,
-                      (x.resolve(self)
-                       for x in self - (pathass | If // pathass)
-                       if x))
+        defs = (x
+                for x in (x.resolve(self)
+                          for x in self - (pathass | If // pathass))
+                if x is not None)
+        #defs = filter(lambda x: x is not None,
+        #              (x.resolve(self)
+        #               for x in self - (pathass | If // pathass)
+        #               if x))
         # retain all IfElse's and only one previous eval (possible final else).
         defs = reduce(lambda accum, d:
                       accum[0] and (type(d) is IfElse, accum[1] + [d])
@@ -826,13 +815,13 @@ class Name(Rentity):
             #return strip_common_path(*defs)
             return reduce(chain_ifelse, defs)
         if len(defs) == 0 or defs[0] is None:
-            return self.copy()
+            return self
         return defs[0]
 
     @cached_resolve
     def resolve(self, n):
         if self is n:
-            return self.copy()
+            return self
         return None
 
     def __eq__(self, a):
@@ -864,15 +853,6 @@ class Assign(Statement):
 
     previous = property(__get_previous, __set_previous)
 
-#    def __new__(self, ast, rightwards=False):
-#        if rightwards:
-#            n, f = 3, 1
-#        else:
-#            n, f = 1, 3
-#        #if type(ast[n]) is Name and type(ast[f]) is Function:
-#        #    return ast[f].make_name(ast[n])
-#        return Rentity.__new__(Assign)
-
     def __init__(self, ast, rightwards=False):
         Statement.__init__(self, ast)
         if rightwards:
@@ -897,7 +877,7 @@ class Assign(Statement):
     @cached_resolve
     def resolve(self, name):
         if self.lhs == name:
-            return self.rhs.copy()
+            return self.rhs
         return None
 
     def ppop(self):
@@ -931,7 +911,7 @@ class Negation(Rentity):
     def eval_to(self):
         x = self.expression.eval_to()
         if isinstance(x, Immed) and x.typ == 'NUM':
-            return Immed(not x.value())
+            return Immed((not x.value()) and 1 or 0)
         return Negation((None, None, x.copy()))
 
     def pp(self):
@@ -992,9 +972,9 @@ class If(Statement):
             if then is None:
                 if els_ is None:
                     return None
-                return IfElse(self, Negation((None, None, cond)),
-                              els_, None)
-            return IfElse(self, cond, then, els_)
+                return IfElse(self, Negation((None, None, cond.copy())),
+                              els_.copy(), None)
+            return IfElse(self, cond.copy(), then.copy(), els_ and els_.copy())
 
     @cached_eval_to
     def eval_to(self):
@@ -1020,10 +1000,9 @@ class IfElse(If):
         #print "cond", cond
         #print "then", then
         #print "els_", els_
-        If.__init__(self, (None, None, None, cond,
-                           None, then, None, els_))
+        If.__init__(self, (None, None, None, cond.copy(),
+                           None, then.copy(), None, els_ and els_.copy()))
         self.previous = ref.previous
-        self.parent = ref.parent
 
     def copy(self):
         return IfElse(self,
@@ -1034,8 +1013,17 @@ class IfElse(If):
 
 class Immed(Rentity):
 
+    def __setv(self, v):
+        if type(v) not in (float, int, str):
+            raise Exception("Type " + type(v).__name__
+                            + " not allowed in immed value !")
+        self._val = v
+
+    value = property(lambda s: s._val, __setv)
+
     def __init__(self, ast):
         Rentity.__init__(self, ast)
+        self._val = None
         if (isinstance(ast, int)
                 or isinstance(ast, float)
                 or isinstance(ast, long)):
